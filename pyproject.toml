@@ -1,0 +1,27 @@
+[project]
+name = "fda-nutrition-env"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "openenv-core[core]>=0.2.2",
+    "openai>=1.0.0",
+    "numpy>=2.4.4",
+]
+
+[project.optional-dependencies]
+dev = []
+
+[project.scripts]
+server = "env.server.app:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["env"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]
