@@ -9,6 +9,7 @@ app = create_app(FDAEnvironment, FDAAction, FDAObservation)
 
 class GraderRequest(BaseModel):
     task_id: str
+    seed: int | None = None
     actions: list[dict]
 
 
@@ -21,7 +22,7 @@ def get_tasks():
 @app.post("/grader")
 def grader(req: GraderRequest):
     env = FDAEnvironment()
-    env.reset(task_id=req.task_id)
+    env.reset(task_id=req.task_id, seed=req.seed)
     for action_payload in req.actions:
         obs = env.step(FDAAction(label=action_payload))
         if obs.done:
