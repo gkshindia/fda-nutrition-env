@@ -4,8 +4,8 @@ FDA Nutrition Facts Panel — Baseline Agent
 Submits corrected Nutrition Facts labels using an OpenAI-compatible LLM.
 
 Required env vars (hackathon):
-    API_BASE_URL  — OpenAI-compatible API endpoint
-    MODEL_NAME    — model identifier (default: gpt-4o-mini)
+    API_BASE_URL  — OpenAI-compatible API endpoint (default: https://api.openai.com/v1)
+    MODEL_NAME    — model identifier (default: gpt-5.4-mini)
     HF_TOKEN      — auth token for HuggingFace inference endpoints
 
 Optional env vars:
@@ -49,7 +49,7 @@ def _env(name: str, default: str | None = None) -> str | None:
     return value.strip() if value.strip() else default
 
 ENVIRONMENT_BASE_URL = _env("ENV_BASE_URL", "http://localhost:7860")
-API_BASE_URL = _env("API_BASE_URL")
+API_BASE_URL = _env("API_BASE_URL", "https://api.openai.com/v1")
 MODEL_NAME = _env("MODEL_NAME", "gpt-5.4-mini")
 HF_TOKEN = _env("HF_TOKEN")
 OPENAI_API_KEY = _env("OPENAI_API_KEY")
@@ -199,17 +199,18 @@ Rounding tiers by nutrient:
 
 def _create_openai_client() -> OpenAI:
     """Create an OpenAI client respecting hackathon env vars."""
-    # When API_BASE_URL is set, we're hitting an external endpoint (e.g. HF inference)
-    # and should use HF_TOKEN as the API key.
-    # When API_BASE_URL is NOT set, we're hitting OpenAI directly and need OPENAI_API_KEY.
-    if API_BASE_URL:
+    api_base_url_from_env = bool(os.getenv("API_BASE_URL", "").strip())
+
+    # If API_BASE_URL was explicitly provided, prefer HF_TOKEN auth for that endpoint.
+    # Otherwise use the OpenAI default endpoint with OPENAI_API_KEY auth.
+    if api_base_url_from_env:
         api_key = HF_TOKEN or OPENAI_API_KEY or "not-needed"
         logger.info("LLM client → %s  model=%s", API_BASE_URL, MODEL_NAME)
-        return OpenAI(api_key=api_key, base_url=API_BASE_URL, timeout=90.0)
     else:
         api_key = OPENAI_API_KEY or HF_TOKEN or "not-needed"
-        logger.info("LLM client → openai  model=%s", MODEL_NAME)
-        return OpenAI(api_key=api_key, timeout=90.0)
+        logger.info("LLM client → %s  model=%s", API_BASE_URL, MODEL_NAME)
+
+    return OpenAI(api_key=api_key, base_url=API_BASE_URL, timeout=90.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -612,6 +613,7 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
     openai_client = _create_openai_client()
     local_env = FDAEnvironment()
     obs = local_env.reset(task_id=task_id, seed=seed)
+    _log_start(task_id, MODEL_NAME)
 
     draft_label = obs.draft_label
     episode_context = obs.episode_context
@@ -637,6 +639,7 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
     while not done:
         step_number += 1
         logger.info("  LLM call step=%d — sending request to %s", step_number, API_BASE_URL or "openai")
+        llm_error: str | None = None
 
         try:
             completion = openai_client.chat.completions.create(
@@ -649,6 +652,7 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
             logger.info("  LLM call step=%d — response received (%d chars)", step_number, len(llm_response_text))
         except Exception as exception:
             llm_response_text = ""
+            llm_error = str(exception)
             logger.warning("LLM call failed at step %d: %s", step_number, exception)
 
         corrected_label = _extract_json_from_response(llm_response_text) or {}
@@ -656,6 +660,14 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
         step_reward = step_result.reward if step_result.reward is not None else 0.0
         done = step_result.done
         all_rewards.append(step_reward)
+        action_json_string = json.dumps(corrected_label, separators=(",", ":"))
+        _log_step(
+            step_number=step_number,
+            action_json=action_json_string,
+            reward=step_reward,
+            done=done,
+            error=llm_error,
+        )
 
         improved = step_reward > best_score
         if improved:
@@ -676,6 +688,12 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
     # Get detailed group scores from final grading
     ground_truth = local_env.state.ground_truth
     grader_result = grade(best_label, ground_truth)
+    _log_end(
+        success=best_score > 0.0,
+        steps=step_number,
+        score=best_score,
+        rewards=all_rewards,
+    )
 
     logger.info("run_baseline_task  task=%s DONE  score=%.3f  steps=%d", task_id, best_score, step_number)
     return {
