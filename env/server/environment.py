@@ -11,10 +11,13 @@ One-step interaction:
 from __future__ import annotations
 
 import json
+import logging
 import uuid
 from typing import Any, Optional
 
 from openenv.core.env_server.interfaces import Environment
+
+logger = logging.getLogger("fda.env")
 
 from core.episode_generator import generate_episode
 from core.grader import grade
@@ -191,6 +194,12 @@ class FDAEnvironment(Environment):
         episode = generate_episode(difficulty, seed=seed)
         self._episode = episode
 
+        logger.info(
+            "RESET  task=%s difficulty=%s seed=%s product=%r",
+            task_id, difficulty, seed,
+            episode.get("food_category_description", "?"),
+        )
+
         self._state = FDAState(
             episode_id=episode_id or str(uuid.uuid4()),
             step_count=0,
@@ -231,7 +240,8 @@ class FDAEnvironment(Environment):
         score = result["score"]
 
         # Track best submission
-        if score > self._state.best_score:
+        improved = score > self._state.best_score
+        if improved:
             self._state.best_score = score
             self._state.best_label = action.label
             self._state.no_improvement_count = 0
@@ -249,6 +259,22 @@ class FDAEnvironment(Environment):
             or self._state.step_count >= self._state.max_steps
             or score >= EARLY_STOP_SCORE_THRESHOLD
             or plateau
+        )
+
+        stop_reason = (
+            "final_submission" if action.final_submission
+            else "max_steps"  if self._state.step_count >= self._state.max_steps
+            else "threshold"  if score >= EARLY_STOP_SCORE_THRESHOLD
+            else "plateau"    if plateau
+            else None
+        )
+
+        logger.info(
+            "STEP %d/%d  task=%s  score=%.3f (best=%.3f)  %s%s",
+            self._state.step_count, self._state.max_steps,
+            self._state.task_id, score, self._state.best_score,
+            "↑ improved" if improved else "↔ no change",
+            f"  → DONE ({stop_reason})" if is_final else "",
         )
 
         if is_final:
