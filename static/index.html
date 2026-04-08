@@ -112,123 +112,6 @@ tailwind.config = {
 <!-- ── MAIN CONTENT ───────────────────────────────────────────────────── -->
 <main class="flex-1 overflow-y-auto bg-surface-container p-6 lg:p-10 space-y-8">
 
-  <!-- Hero -->
-  <section class="border-2 border-black bg-white p-8 relative overflow-hidden">
-    <div class="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
-      <span class="material-symbols-outlined text-[120px]">policy</span>
-    </div>
-    <div class="max-w-3xl relative z-10">
-      <h2 class="text-4xl lg:text-5xl font-black tracking-tighter uppercase leading-none mb-6">
-        Can an AI read<br/>the fine print?
-      </h2>
-      <p class="text-base text-secondary leading-relaxed mb-8 border-l-4 border-black pl-6">
-        Every food package sold in the US must carry a Nutrition Facts label that follows 40+ exact FDA rules — specific rounding increments, ingredient ordering by finished weight, calorie math from Atwater factors, minimum type sizes based on package area. Getting any of it wrong is a federal violation.<br/><br/>
-        This protocol injects deliberate errors into a draft label, then deploys an AI agent to find and fix every mistake — without being told which fields are wrong. The agent revises up to 10 times to reach 90% compliance.
-      </p>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div class="border border-black p-4 bg-surface-container-lowest">
-          <div class="text-[10px] font-black text-outline uppercase mb-1">Scoring Categories</div>
-          <div class="text-2xl font-black">7 GROUPS</div>
-          <div class="text-[10px] text-secondary mt-1">nutrients · %DVs · serving · ingredients · type size · health claims · calorie math</div>
-        </div>
-        <div class="border border-black p-4 bg-surface-container-lowest">
-          <div class="text-[10px] font-black text-outline uppercase mb-1">Difficulty Levels</div>
-          <div class="text-2xl font-black">3 TIERS</div>
-          <div class="text-[10px] text-secondary mt-1">easy: 3 errors · medium: 5 + ambiguous RACC · hard: 7 + 3-way category ambiguity</div>
-        </div>
-        <div class="border border-black p-4 bg-surface-container-lowest">
-          <div class="text-[10px] font-black text-outline uppercase mb-1">Pass Threshold</div>
-          <div class="text-2xl font-black">90%</div>
-          <div class="text-[10px] text-secondary mt-1">FDA-acceptable compliance · agent auto-stops when reached</div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-  <!-- Controls -->
-  <section class="flex flex-col md:flex-row justify-between items-center gap-6 bg-black p-6 text-white">
-    <div class="flex items-center gap-6">
-      <span class="text-xs font-black tracking-widest uppercase">Select Protocol Severity:</span>
-      <div id="difficulty-group" class="flex border border-white">
-        <button onclick="setDifficulty('easy')"   class="diff-btn px-6 py-2 text-xs font-bold bg-white text-black" data-d="easy">EASY</button>
-        <button onclick="setDifficulty('medium')" class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="medium">MEDIUM</button>
-        <button onclick="setDifficulty('hard')"   class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="hard">HARD</button>
-      </div>
-    </div>
-    <div class="flex items-center gap-4">
-      <div class="flex flex-col gap-1">
-        <label class="text-[10px] font-bold uppercase tracking-widest text-neutral-400">Seed (optional)</label>
-        <input id="seed-input" type="number" min="0" placeholder="random"
-          class="bg-white/10 border border-white/30 text-white text-xs font-mono px-3 py-2 w-28 placeholder:text-neutral-500 focus:outline-none focus:border-white"/>
-      </div>
-      <div class="flex flex-col items-end gap-1">
-        <button id="run-btn" onclick="runProtocol()"
-          class="bg-status-success text-black px-10 py-4 font-black uppercase tracking-tighter text-sm flex items-center gap-2">
-          <span id="run-btn-text">RUN BASELINE PROTOCOL</span>
-          <span id="run-btn-icon" class="material-symbols-outlined">arrow_forward</span>
-        </button>
-        <span class="text-[10px] text-neutral-400">Runs GPT-4o-mini · ~20–40 seconds</span>
-      </div>
-    </div>
-  </section>
-
-  <!-- Inline progress panel (hidden until running) -->
-  <section id="run-progress" class="hidden bg-black text-white border-t-2 border-white/10 px-6 py-4">
-    <div class="flex items-center gap-4 mb-3">
-      <span class="material-symbols-outlined text-lg running-pulse">sync</span>
-      <span id="loading-task-label" class="font-headline font-black tracking-tighter uppercase text-sm">—</span>
-      <span class="text-[10px] font-mono text-neutral-400 ml-auto">RUNNING…</span>
-    </div>
-    <div class="w-full h-1 bg-white/10 relative overflow-hidden mb-3">
-      <div class="bar-indeterminate"></div>
-    </div>
-    <div id="loading-log" class="font-mono text-[10px] text-neutral-500 space-y-[2px]">
-      <div>→ Initializing episode generator…</div>
-    </div>
-  </section>
-
-  <!-- Label Comparison -->
-  <section class="grid grid-cols-1 xl:grid-cols-2 gap-8">
-
-    <!-- Draft -->
-    <div class="space-y-4">
-      <div class="flex items-center gap-2 text-status-warning font-black uppercase tracking-widest text-sm">
-        <span class="material-symbols-outlined">warning</span> DRAFT INPUT (UNVERIFIED)
-      </div>
-      <div id="draft-label-wrap" class="bg-white border-2 border-black p-4 max-w-[420px] mx-auto">
-        <div class="text-center text-[10px] text-outline py-8">Run a protocol to load draft label.</div>
-      </div>
-    </div>
-
-    <!-- Corrected -->
-    <div class="space-y-4">
-      <div class="flex items-center gap-2 text-status-success font-black uppercase tracking-widest text-sm">
-        <span class="material-symbols-outlined">check_circle</span> AGENT CORRECTED OUTPUT
-      </div>
-      <div class="relative max-w-[420px] mx-auto">
-        <div id="corrected-overlay" class="absolute inset-0 bg-white/60 backdrop-blur-sm z-20 flex flex-col items-center justify-center border-2 border-dashed border-black/20">
-          <span class="material-symbols-outlined text-4xl mb-2 text-outline">visibility_off</span>
-          <span class="text-[10px] font-black uppercase tracking-widest text-outline">Protocol Not Yet Executed</span>
-        </div>
-        <div id="corrected-label-wrap" class="bg-white border-2 border-black p-4">
-          <div class="text-center text-[10px] text-outline py-8">Awaiting agent output.</div>
-        </div>
-      </div>
-    </div>
-
-  </section>
-
-  <!-- Grader Breakdown -->
-  <section class="bg-white border-2 border-black p-8">
-    <h3 class="text-xl font-black uppercase tracking-tight mb-8 border-b-2 border-black pb-2">
-      Grader Breakdown: Metric Compliance
-    </h3>
-    <div id="grader-breakdown" class="space-y-5">
-      <!-- filled by JS -->
-      <div class="text-[10px] text-outline">Execute a protocol run to view compliance breakdown.</div>
-    </div>
-  </section>
-
   <!-- API Explorer -->
   <section class="bg-white border-2 border-black p-8">
     <h3 class="text-xl font-black uppercase tracking-tight mb-2 border-b-2 border-black pb-2">
@@ -249,12 +132,16 @@ tailwind.config = {
             <option value="task_medium">task_medium</option>
             <option value="task_hard">task_hard</option>
           </select>
-          <input id="api-reset-seed" type="number" min="0" placeholder="seed (optional)"
-            class="w-full border border-black text-xs p-2 font-mono placeholder:text-outline"/>
         </div>
         <button onclick="apiReset()" class="w-full bg-primary text-white text-[10px] font-bold uppercase py-2 hover:bg-tertiary transition-colors">
           Reset Environment
         </button>
+        <button onclick="apiRunAgent()" id="run-agent-btn"
+          class="w-full bg-status-success text-black text-[10px] font-bold uppercase py-2 hover:opacity-80 transition-opacity flex items-center justify-center gap-1">
+          <span class="material-symbols-outlined text-sm">smart_toy</span>
+          Run LLM Agent
+        </button>
+        <p class="text-[9px] text-outline">Runs GPT-4o-mini · calls /baseline/run</p>
       </div>
 
       <!-- /step -->
@@ -300,6 +187,118 @@ tailwind.config = {
         <span id="api-response-status" class="text-[10px] font-mono text-neutral-400">—</span>
       </div>
       <pre id="api-response-body" class="p-4 text-[10px] font-mono overflow-auto max-h-[300px] bg-surface-container-lowest text-on-surface whitespace-pre-wrap">No request sent yet.</pre>
+    </div>
+  </section>
+
+  <!-- Label Comparison -->
+  <section class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+
+    <!-- Draft -->
+    <div class="space-y-4">
+      <div class="flex items-center gap-2 text-status-warning font-black uppercase tracking-widest text-sm">
+        <span class="material-symbols-outlined">warning</span> DRAFT INPUT (UNVERIFIED)
+      </div>
+      <div id="draft-label-wrap" class="bg-white border-2 border-black p-4 max-w-[420px] mx-auto">
+        <div class="text-center text-[10px] text-outline py-8">Call /reset to load draft label.</div>
+      </div>
+    </div>
+
+    <!-- Corrected -->
+    <div class="space-y-4">
+      <div class="flex items-center gap-2 text-status-success font-black uppercase tracking-widest text-sm">
+        <span class="material-symbols-outlined">check_circle</span> SUBMITTED LABEL (STEP OUTPUT)
+      </div>
+      <div class="relative max-w-[420px] mx-auto">
+        <div id="corrected-overlay" class="absolute inset-0 bg-white/60 backdrop-blur-sm z-20 flex flex-col items-center justify-center border-2 border-dashed border-black/20">
+          <span class="material-symbols-outlined text-4xl mb-2 text-outline">visibility_off</span>
+          <span class="text-[10px] font-black uppercase tracking-widest text-outline">Submit a /step to see output</span>
+        </div>
+        <div id="corrected-label-wrap" class="bg-white border-2 border-black p-4">
+          <div class="text-center text-[10px] text-outline py-8">Awaiting step submission.</div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Hero -->
+  <section class="border-2 border-black bg-white p-8 relative overflow-hidden">
+    <div class="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+      <span class="material-symbols-outlined text-[120px]">policy</span>
+    </div>
+    <div class="max-w-3xl relative z-10">
+      <h2 class="text-4xl lg:text-5xl font-black tracking-tighter uppercase leading-none mb-6">
+        Can an AI read<br/>the fine print?
+      </h2>
+      <p class="text-base text-secondary leading-relaxed mb-8 border-l-4 border-black pl-6">
+        Every food package sold in the US must carry a Nutrition Facts label that follows 40+ exact FDA rules — specific rounding increments, ingredient ordering by finished weight, calorie math from Atwater factors, minimum type sizes based on package area. Getting any of it wrong is a federal violation.<br/><br/>
+        This protocol injects deliberate errors into a draft label, then deploys an AI agent to find and fix every mistake — without being told which fields are wrong. The agent revises up to 10 times to reach 90% compliance.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="border border-black p-4 bg-surface-container-lowest">
+          <div class="text-[10px] font-black text-outline uppercase mb-1">Scoring Categories</div>
+          <div class="text-2xl font-black">7 GROUPS</div>
+          <div class="text-[10px] text-secondary mt-1">nutrients · %DVs · serving · ingredients · type size · health claims · calorie math</div>
+        </div>
+        <div class="border border-black p-4 bg-surface-container-lowest">
+          <div class="text-[10px] font-black text-outline uppercase mb-1">Difficulty Levels</div>
+          <div class="text-2xl font-black">3 TIERS</div>
+          <div class="text-[10px] text-secondary mt-1">easy: 3 errors · medium: 5 + ambiguous RACC · hard: 7 + 3-way category ambiguity</div>
+        </div>
+        <div class="border border-black p-4 bg-surface-container-lowest">
+          <div class="text-[10px] font-black text-outline uppercase mb-1">Pass Threshold</div>
+          <div class="text-2xl font-black">90%</div>
+          <div class="text-[10px] text-secondary mt-1">FDA-acceptable compliance · agent auto-stops when reached</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Controls -->
+  <section class="flex flex-col md:flex-row justify-between items-center gap-6 bg-black p-6 text-white">
+    <div class="flex items-center gap-6">
+      <span class="text-xs font-black tracking-widest uppercase">Select Protocol Severity:</span>
+      <div id="difficulty-group" class="flex border border-white">
+        <button onclick="setDifficulty('easy')"   class="diff-btn px-6 py-2 text-xs font-bold bg-white text-black" data-d="easy">EASY</button>
+        <button onclick="setDifficulty('medium')" class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="medium">MEDIUM</button>
+        <button onclick="setDifficulty('hard')"   class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="hard">HARD</button>
+      </div>
+    </div>
+    <div class="flex items-center gap-4">
+      <div class="flex flex-col items-end gap-1">
+        <button id="run-btn" onclick="runProtocol()"
+          class="bg-status-success text-black px-10 py-4 font-black uppercase tracking-tighter text-sm flex items-center gap-2">
+          <span id="run-btn-text">RUN BASELINE PROTOCOL</span>
+          <span id="run-btn-icon" class="material-symbols-outlined">arrow_forward</span>
+        </button>
+        <span class="text-[10px] text-neutral-400">Runs GPT-4o-mini · ~20–40 seconds</span>
+      </div>
+    </div>
+  </section>
+
+  <!-- Inline progress panel (hidden until running) -->
+  <section id="run-progress" class="hidden bg-black text-white border-t-2 border-white/10 px-6 py-4">
+    <div class="flex items-center gap-4 mb-3">
+      <span class="material-symbols-outlined text-lg running-pulse">sync</span>
+      <span id="loading-task-label" class="font-headline font-black tracking-tighter uppercase text-sm">—</span>
+      <span class="text-[10px] font-mono text-neutral-400 ml-auto">RUNNING…</span>
+    </div>
+    <div class="w-full h-1 bg-white/10 relative overflow-hidden mb-3">
+      <div class="bar-indeterminate"></div>
+    </div>
+    <div id="loading-log" class="font-mono text-[10px] text-neutral-500 space-y-[2px]">
+      <div>→ Initializing episode generator…</div>
+    </div>
+  </section>
+
+  <!-- Grader Breakdown -->
+  <section class="bg-white border-2 border-black p-8">
+    <h3 class="text-xl font-black uppercase tracking-tight mb-8 border-b-2 border-black pb-2">
+      Grader Breakdown: Metric Compliance
+    </h3>
+    <div id="grader-breakdown" class="space-y-5">
+      <!-- filled by JS -->
+      <div class="text-[10px] text-outline">Execute a protocol run to view compliance breakdown.</div>
     </div>
   </section>
 
@@ -468,9 +467,7 @@ async function runProtocol() {
 
   try {
     const cfg = TASK_CONFIG[selectedDifficulty];
-    const seedVal = document.getElementById("seed-input").value.trim();
     const payload = { task_id: cfg.task_id };
-    if (seedVal !== "") payload.seed = parseInt(seedVal, 10);
     const resp = await fetch(`${BASE_URL}/baseline/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -721,6 +718,10 @@ function addHistoryRow(data, scorePct, desc) {
   tbody.insertBefore(tr, tbody.firstChild);
 }
 
+// ── API Explorer state ────────────────────────────────────────────────
+let _apiDraftLabel     = null;
+let _apiEpisodeContext = null;
+
 // ── API Explorer functions ────────────────────────────────────────────
 async function apiCall(endpoint, method, body) {
   const statusEl = document.getElementById("api-response-status");
@@ -745,21 +746,108 @@ async function apiCall(endpoint, method, body) {
 
 async function apiReset() {
   const taskId = document.getElementById("api-task-select").value;
-  const seedVal = document.getElementById("api-reset-seed").value.trim();
   const payload = { task_id: taskId };
-  if (seedVal !== "") payload.seed = parseInt(seedVal, 10);
-  await apiCall("/reset", "POST", payload);
+
+  const statusEl = document.getElementById("api-response-status");
+  const bodyEl   = document.getElementById("api-response-body");
+  statusEl.textContent = `POST /reset …`;
+  bodyEl.textContent   = "Loading…";
+  try {
+    const resp = await fetch(`${BASE_URL}/reset`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    statusEl.textContent = `${resp.status} ${resp.statusText} — POST /reset`;
+    bodyEl.textContent   = JSON.stringify(data, null, 2);
+
+    // Auto-fill /step textarea and render draft label panel
+    const draftLabel     = data?.observation?.draft_label ?? data?.draft_label;
+    const episodeContext = data?.observation?.episode_context ?? data?.episode_context ?? {};
+    if (draftLabel) {
+      document.getElementById("api-step-action").value =
+        JSON.stringify({ label: draftLabel, final_submission: true }, null, 2);
+
+      // Store for comparison rendering
+      _apiDraftLabel     = draftLabel;
+      _apiEpisodeContext = episodeContext;
+
+      // Render draft label panel
+      const totalPkg = episodeContext.total_package_weight_g || 0;
+      const servingG = draftLabel.serving_size_g || 1;
+      const servings = totalPkg > 0 ? Math.round(totalPkg / servingG) : 1;
+      renderLabel("draft-label-wrap", draftLabel, draftLabel, episodeContext, servings, false);
+
+      // Reset corrected panel to waiting state
+      document.getElementById("corrected-overlay").style.display = "flex";
+      document.getElementById("corrected-label-wrap").innerHTML =
+        '<div class="text-center text-[10px] text-outline py-8">Awaiting step submission.</div>';
+    }
+  } catch (err) {
+    statusEl.textContent = `ERROR — POST /reset`;
+    bodyEl.textContent   = err.message;
+  }
 }
 
 async function apiStep() {
   const raw = document.getElementById("api-step-action").value.trim();
   if (!raw) { alert("Paste a JSON action first."); return; }
-  try {
-    const action = JSON.parse(raw);
-    await apiCall("/step", "POST", { action });
-  } catch (err) {
-    alert("Invalid JSON: " + err.message);
+  let action;
+  try { action = JSON.parse(raw); } catch (err) { alert("Invalid JSON: " + err.message); return; }
+
+  await apiCall("/step", "POST", { action });
+
+  // Render submitted label in the corrected panel
+  const submittedLabel = action?.label;
+  if (submittedLabel && _apiDraftLabel) {
+    const totalPkg = (_apiEpisodeContext || {}).total_package_weight_g || 0;
+    const servingG = submittedLabel.serving_size_g || 1;
+    const servings = totalPkg > 0 ? Math.round(totalPkg / servingG) : 1;
+    document.getElementById("corrected-overlay").style.display = "none";
+    renderLabel("corrected-label-wrap", submittedLabel, submittedLabel, _apiEpisodeContext || {}, servings, true);
   }
+}
+
+async function apiRunAgent() {
+  const taskId = document.getElementById("api-task-select").value;
+  const payload = { task_id: taskId };
+
+  const btn = document.getElementById("run-agent-btn");
+  btn.innerHTML = '<span class="material-symbols-outlined text-sm running-pulse">sync</span> Running…';
+  btn.disabled = true;
+
+  await apiCall("/baseline/run", "POST", payload);
+
+  const bodyEl = document.getElementById("api-response-body");
+  let data;
+  try { data = JSON.parse(bodyEl.textContent); } catch {
+    btn.innerHTML = '<span class="material-symbols-outlined text-sm">smart_toy</span> Run LLM Agent';
+    btn.disabled = false;
+    return;
+  }
+
+  const draftLabel     = data.draft_label;
+  const correctedLabel = data.corrected_label;
+  const episodeContext = data.episode_context || {};
+
+  if (draftLabel && correctedLabel) {
+    _apiDraftLabel     = draftLabel;
+    _apiEpisodeContext = episodeContext;
+    const totalPkg = episodeContext.total_package_weight_g || 0;
+    const servingG = draftLabel.serving_size_g || 1;
+    const servings = totalPkg > 0 ? Math.round(totalPkg / servingG) : 1;
+    renderLabel("draft-label-wrap",     draftLabel,     correctedLabel, episodeContext, servings, false);
+    renderLabel("corrected-label-wrap", correctedLabel, correctedLabel, episodeContext, servings, true);
+    document.getElementById("corrected-overlay").style.display = "none";
+  }
+
+  if (data.group_scores) {
+    renderGraderBreakdown(data.group_scores, Math.round((data.grader_score || 0) * 100));
+  }
+
+  btn.innerHTML = '<span class="material-symbols-outlined text-sm">smart_toy</span> Run LLM Agent';
+  btn.disabled = false;
 }
 
 // Init

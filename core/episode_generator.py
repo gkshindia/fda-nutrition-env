@@ -609,100 +609,21 @@ def _inject_errors_easy(
     ground_truth: dict,
 ) -> tuple[dict, list[dict]]:
     """
-    3 injected errors for easy:
-    1. One wrong %DV
-    2. Wrong ingredient order (swap 2 adjacent)
-    3. Type size below minimum
+    5 injected errors for easy:
+    1. One wrong %DV (small delta — easy to overlook)
+    2. A second wrong %DV on a different nutrient
+    3. Wrong ingredient order (swap 2 adjacent)
+    4. Type size below minimum
+    5. One wrong nutrient rounding
     """
     errors = []
     label = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
              for k, v in label.items()}
 
-    # Error 1: wrong %DV for a random nutrient that has a DV
+    # Errors 1-2: two wrong %DVs on different nutrients
     dv_fields = [f for f, v in label["percent_dvs"].items() if v is not None and v > 0]
-    if dv_fields:
-        field = rng.choice(dv_fields)
-        correct = label["percent_dvs"][field]
-        # Inject wrong value: shift by ±5-15%
-        delta = int(rng.choice([-15, -10, -5, 5, 10, 15]))
-        wrong = max(0, int(correct) + delta)
-        label["percent_dvs"][field] = wrong
-        errors.append({
-            "type": "wrong_percent_dv",
-            "field_path": f"percent_dvs.{field}",
-            "injected_value": wrong,
-            "correct_value": int(correct),
-        })
-
-    # Error 2: swap two adjacent ingredients in the list
-    ingr = label["ingredient_list"]
-    if len(ingr) >= 2:
-        idx = int(rng.randint(0, len(ingr) - 1))
-        ingr[idx], ingr[idx + 1] = ingr[idx + 1], ingr[idx]
-        errors.append({
-            "type": "wrong_ingredient_order",
-            "field_path": "ingredient_list",
-            "injected_value": list(ingr),
-            "correct_value": list(ground_truth["ingredient_order"]),
-        })
-
-    # Error 3: type size below minimum
-    min_size = ground_truth["min_type_size_inch"]
-    # Inject size that is ~half of minimum (clearly below)
-    wrong_size = round(min_size * 0.5, 4)
-    label["declared_type_size_inch"] = wrong_size
-    errors.append({
-        "type": "type_size_violation",
-        "field_path": "declared_type_size_inch",
-        "injected_value": wrong_size,
-        "correct_value": min_size,
-    })
-
-    return label, errors
-
-
-def _inject_errors_medium(
-    rng: np.random.RandomState,
-    label: dict,
-    ground_truth: dict,
-) -> tuple[dict, list[dict]]:
-    """
-    5 injected errors for medium:
-    1-2. Two wrong nutrient rounding values
-    3. Wrong %DV
-    4. Wrong ingredient order
-    5. Cross-step inconsistency: serving size on label ≠ RACC decision
-    """
-    errors = []
-    label = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
-             for k, v in label.items()}
-
-    # Errors 1-2: wrong nutrient rounding (nudge to wrong increment)
-    # Target nutrients with g-scale values (easier to mis-round)
-    rounding_targets = ["total_fat_g", "total_carbohydrate_g", "protein_g",
-                        "dietary_fiber_g", "sodium_mg"]
-    chosen = rng.choice(rounding_targets, size=min(2, len(rounding_targets)),
-                        replace=False)
-    for field in chosen:
-        correct = label["nutrients"][field]
-        # Shift by half an increment in wrong direction
-        if field.endswith("_mg"):
-            wrong = correct + float(rng.choice([-5.0, 5.0]))
-        else:
-            wrong = correct + float(rng.choice([-0.5, 0.5, -1.0, 1.0]))
-        wrong = max(0.0, wrong)
-        label["nutrients"][field] = wrong
-        errors.append({
-            "type": "wrong_rounding",
-            "field_path": f"nutrients.{field}",
-            "injected_value": wrong,
-            "correct_value": correct,
-        })
-
-    # Error 3: wrong %DV
-    dv_fields = [f for f, v in label["percent_dvs"].items() if v is not None and v > 0]
-    if dv_fields:
-        field = rng.choice(dv_fields)
+    chosen_dv = rng.choice(dv_fields, size=min(2, len(dv_fields)), replace=False)
+    for field in chosen_dv:
         correct = label["percent_dvs"][field]
         delta = int(rng.choice([-10, -5, 5, 10]))
         wrong = max(0, int(correct) + delta)
@@ -714,7 +635,7 @@ def _inject_errors_medium(
             "correct_value": int(correct),
         })
 
-    # Error 4: wrong ingredient order
+    # Error 3: swap two adjacent ingredients in the list
     ingr = label["ingredient_list"]
     if len(ingr) >= 2:
         idx = int(rng.randint(0, len(ingr) - 1))
@@ -726,7 +647,112 @@ def _inject_errors_medium(
             "correct_value": list(ground_truth["ingredient_order"]),
         })
 
-    # Error 5: cross-step inconsistency — serving size off by 5g
+    # Error 4: type size below minimum
+    min_size = ground_truth["min_type_size_inch"]
+    wrong_size = round(min_size * 0.5, 4)
+    label["declared_type_size_inch"] = wrong_size
+    errors.append({
+        "type": "type_size_violation",
+        "field_path": "declared_type_size_inch",
+        "injected_value": wrong_size,
+        "correct_value": min_size,
+    })
+
+    # Error 5: one wrong nutrient rounding
+    rounding_targets = ["total_fat_g", "total_carbohydrate_g", "protein_g", "sodium_mg"]
+    field = str(rng.choice(rounding_targets))
+    correct = label["nutrients"][field]
+    if field.endswith("_mg"):
+        wrong = correct + float(rng.choice([-5.0, 5.0]))
+    else:
+        wrong = correct + float(rng.choice([-0.5, 0.5, -1.0, 1.0]))
+    wrong = max(0.0, wrong)
+    label["nutrients"][field] = wrong
+    errors.append({
+        "type": "wrong_rounding",
+        "field_path": f"nutrients.{field}",
+        "injected_value": wrong,
+        "correct_value": correct,
+    })
+
+    return label, errors
+
+
+def _inject_errors_medium(
+    rng: np.random.RandomState,
+    label: dict,
+    ground_truth: dict,
+) -> tuple[dict, list[dict]]:
+    """
+    7 injected errors for medium:
+    1-3. Three wrong nutrient rounding values
+    4-5. Two wrong %DVs (one on a nutrient with wrong rounding — cascades)
+    6. Wrong ingredient order (non-adjacent swap)
+    7. Cross-step inconsistency: serving size on label ≠ RACC decision
+    """
+    errors = []
+    label = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
+             for k, v in label.items()}
+
+    # Errors 1-3: three wrong nutrient roundings
+    rounding_targets = ["total_fat_g", "total_carbohydrate_g", "protein_g",
+                        "dietary_fiber_g", "sodium_mg", "saturated_fat_g"]
+    chosen = rng.choice(rounding_targets, size=min(3, len(rounding_targets)), replace=False)
+    injected_rounding_fields = set()
+    for field in chosen:
+        correct = label["nutrients"][field]
+        if field.endswith("_mg"):
+            wrong = correct + float(rng.choice([-5.0, 5.0, -10.0, 10.0]))
+        else:
+            wrong = correct + float(rng.choice([-0.5, 0.5, -1.0, 1.0]))
+        wrong = max(0.0, wrong)
+        label["nutrients"][field] = wrong
+        injected_rounding_fields.add(field)
+        errors.append({
+            "type": "wrong_rounding",
+            "field_path": f"nutrients.{field}",
+            "injected_value": wrong,
+            "correct_value": correct,
+        })
+
+    # Errors 4-5: two wrong %DVs — one on a field that was already rounded wrong (cascade)
+    dv_fields = [f for f, v in label["percent_dvs"].items() if v is not None and v > 0]
+    cascaded = [f for f in dv_fields if f in injected_rounding_fields]
+    independent = [f for f in dv_fields if f not in injected_rounding_fields]
+    # Pick one cascaded and one independent if possible
+    dv_pick = []
+    if cascaded:
+        dv_pick.append(str(rng.choice(cascaded)))
+    if independent:
+        dv_pick.append(str(rng.choice([f for f in independent if f not in dv_pick])))
+    dv_pick = dv_pick[:2]
+    for field in dv_pick:
+        correct = label["percent_dvs"][field]
+        delta = int(rng.choice([-10, -5, 5, 10]))
+        wrong = max(0, int(correct) + delta)
+        label["percent_dvs"][field] = wrong
+        errors.append({
+            "type": "wrong_percent_dv",
+            "field_path": f"percent_dvs.{field}",
+            "injected_value": wrong,
+            "correct_value": int(correct),
+        })
+
+    # Error 6: wrong ingredient order — swap two non-adjacent items
+    ingr = label["ingredient_list"]
+    if len(ingr) >= 3:
+        i, j = 0, len(ingr) - 1  # swap first and last
+        ingr[i], ingr[j] = ingr[j], ingr[i]
+    elif len(ingr) >= 2:
+        ingr[0], ingr[1] = ingr[1], ingr[0]
+    errors.append({
+        "type": "wrong_ingredient_order",
+        "field_path": "ingredient_list",
+        "injected_value": list(ingr),
+        "correct_value": list(ground_truth["ingredient_order"]),
+    })
+
+    # Error 7: cross-step inconsistency — serving size off by 5g
     correct_ss = label["serving_size_g"]
     wrong_ss = correct_ss + float(rng.choice([-5.0, 5.0]))
     label["serving_size_g"] = wrong_ss
@@ -748,30 +774,32 @@ def _inject_errors_hard(
     health_claim: str,
 ) -> tuple[dict, list[dict]]:
     """
-    7 injected errors for hard:
-    1-3. Three wrong nutrient roundings (at rounding boundaries)
-    4. Unsupported front-of-pack health claim
-    5. Atwater inconsistency in declared calories
-    6. Wrong ingredient order
-    7. Wrong %DV with cross-step ripple
+    10 injected errors for hard:
+    1-4. Four wrong nutrient roundings (at rounding boundaries)
+    5.   Unsupported front-of-pack health claim
+    6.   Atwater inconsistency in declared calories
+    7.   Wrong ingredient order (full reversal of two non-trivial positions)
+    8-9. Two wrong %DVs — one cascades from wrong rounding, one independent
+    10.  Cross-step serving size inconsistency (cascades to all per-serving values)
     """
     errors = []
     label = {k: (dict(v) if isinstance(v, dict) else list(v) if isinstance(v, list) else v)
              for k, v in label.items()}
 
-    # Errors 1-3: wrong nutrient roundings
+    # Errors 1-4: four wrong nutrient roundings
     rounding_targets = ["total_fat_g", "saturated_fat_g", "total_carbohydrate_g",
-                        "dietary_fiber_g", "protein_g", "sodium_mg"]
-    chosen = rng.choice(rounding_targets, size=min(3, len(rounding_targets)),
-                        replace=False)
+                        "dietary_fiber_g", "protein_g", "sodium_mg", "potassium_mg"]
+    chosen = rng.choice(rounding_targets, size=min(4, len(rounding_targets)), replace=False)
+    injected_rounding_fields = set()
     for field in chosen:
         correct = label["nutrients"][field]
         if field.endswith("_mg"):
-            wrong = correct + float(rng.choice([-10.0, 10.0]))
+            wrong = correct + float(rng.choice([-10.0, 10.0, -5.0, 5.0]))
         else:
-            wrong = correct + float(rng.choice([-1.0, 1.0]))
+            wrong = correct + float(rng.choice([-1.0, 1.0, -0.5, 0.5]))
         wrong = max(0.0, wrong)
         label["nutrients"][field] = wrong
+        injected_rounding_fields.add(field)
         errors.append({
             "type": "wrong_rounding",
             "field_path": f"nutrients.{field}",
@@ -779,7 +807,7 @@ def _inject_errors_hard(
             "correct_value": correct,
         })
 
-    # Error 4: unsupported health claim on PDP
+    # Error 5: unsupported health claim on PDP
     label["health_claims"] = [health_claim]
     errors.append({
         "type": "unsupported_health_claim",
@@ -790,19 +818,13 @@ def _inject_errors_hard(
                 f"or references a nutrient without an established DV.",
     })
 
-    # Error 5: Atwater inconsistency — wrong declared calories
-    # Compute what Atwater gives from the *injected* (wrong) macros, then add a further offset
-    wrong_fat = label["nutrients"].get("total_fat_g",
-                                       ground_truth["per_serving_rounded"]["total_fat_g"])
-    wrong_carb = label["nutrients"].get("total_carbohydrate_g",
-                                        ground_truth["per_serving_rounded"]["total_carbohydrate_g"])
-    wrong_prot = label["nutrients"].get("protein_g",
-                                        ground_truth["per_serving_rounded"]["protein_g"])
+    # Error 6: Atwater inconsistency — wrong declared calories
+    wrong_fat  = label["nutrients"].get("total_fat_g",          ground_truth["per_serving_rounded"]["total_fat_g"])
+    wrong_carb = label["nutrients"].get("total_carbohydrate_g", ground_truth["per_serving_rounded"]["total_carbohydrate_g"])
+    wrong_prot = label["nutrients"].get("protein_g",            ground_truth["per_serving_rounded"]["protein_g"])
     atwater_from_wrong = compute_atwater_calories(wrong_fat, wrong_carb, wrong_prot)
-    # Inject a further +/- 20 kcal offset on top (clearly inconsistent)
-    kcal_offset = float(rng.choice([-20.0, 20.0, 30.0, -30.0]))
-    wrong_kcal = round_calories(atwater_from_wrong) + kcal_offset
-    wrong_kcal = max(0.0, wrong_kcal)
+    kcal_offset = float(rng.choice([-20.0, 20.0, 30.0, -30.0, 40.0, -40.0]))
+    wrong_kcal = max(0.0, round_calories(atwater_from_wrong) + kcal_offset)
     correct_kcal = ground_truth["atwater_kcal_declared"]
     label["nutrients"]["energy_kcal"] = wrong_kcal
     errors.append({
@@ -810,32 +832,34 @@ def _inject_errors_hard(
         "field_path": "nutrients.energy_kcal",
         "injected_value": wrong_kcal,
         "correct_value": correct_kcal,
-        "note": "Declared calories are inconsistent with Atwater calculation "
-                "from declared macros.",
+        "note": "Declared calories are inconsistent with Atwater calculation from declared macros.",
     })
 
-    # Error 6: wrong ingredient order
+    # Error 7: wrong ingredient order — rotate list by 2 positions
     ingr = label["ingredient_list"]
     if len(ingr) >= 3:
-        # Move last ingredient to front
-        ingr.insert(0, ingr.pop())
-        errors.append({
-            "type": "wrong_ingredient_order",
-            "field_path": "ingredient_list",
-            "injected_value": list(ingr),
-            "correct_value": list(ground_truth["ingredient_order"]),
-        })
+        ingr[:] = ingr[2:] + ingr[:2]  # rotate left by 2
+    errors.append({
+        "type": "wrong_ingredient_order",
+        "field_path": "ingredient_list",
+        "injected_value": list(ingr),
+        "correct_value": list(ground_truth["ingredient_order"]),
+    })
 
-    # Error 7: wrong %DV that cascades from the already-wrong rounding
-    # Use a nutrient whose rounding was NOT already injected
-    injected_fields = {e["field_path"].split(".")[-1] for e in errors
-                       if e["type"] == "wrong_rounding"}
-    dv_fields = [f for f, v in label["percent_dvs"].items()
-                 if v is not None and v > 0 and f not in injected_fields]
-    if dv_fields:
-        field = rng.choice(dv_fields)
+    # Errors 8-9: two wrong %DVs
+    dv_fields = [f for f, v in label["percent_dvs"].items() if v is not None and v > 0]
+    cascaded   = [f for f in dv_fields if f in injected_rounding_fields]
+    independent = [f for f in dv_fields if f not in injected_rounding_fields]
+    dv_pick: list[str] = []
+    if cascaded:
+        dv_pick.append(str(rng.choice(cascaded)))
+    if independent:
+        remaining = [f for f in independent if f not in dv_pick]
+        if remaining:
+            dv_pick.append(str(rng.choice(remaining)))
+    for field in dv_pick[:2]:
         correct = label["percent_dvs"][field]
-        delta = int(rng.choice([-15, 15, -10, 10]))
+        delta = int(rng.choice([-15, 15, -10, 10, -20, 20]))
         wrong = max(0, int(correct) + delta)
         label["percent_dvs"][field] = wrong
         errors.append({
@@ -845,6 +869,18 @@ def _inject_errors_hard(
             "correct_value": int(correct),
             "note": "Cross-step: %DV inconsistent with declared rounded value.",
         })
+
+    # Error 10: cross-step serving size inconsistency
+    correct_ss = label["serving_size_g"]
+    wrong_ss = correct_ss + float(rng.choice([-10.0, 10.0, -5.0, 5.0]))
+    label["serving_size_g"] = max(1.0, wrong_ss)
+    errors.append({
+        "type": "cross_step_inconsistency",
+        "field_path": "serving_size_g",
+        "injected_value": max(1.0, wrong_ss),
+        "correct_value": correct_ss,
+        "note": "Serving size does not match RACC decision tree — all per-serving values cascade.",
+    })
 
     return label, errors
 
