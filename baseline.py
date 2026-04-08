@@ -345,66 +345,23 @@ def _compute_pdp_and_type_size(episode_context: dict) -> tuple[float, float]:
 
 def _build_user_prompt(observation_data: dict) -> str:
     """
-    Build the user prompt with pre-computed intermediate values.
-
-    Pre-computes scaling, ingredient order, and PDP/type size so the LLM
-    only needs to apply FDA rounding rules — not do multi-step arithmetic.
+    Build the initial user prompt. Raw episode data only — no pre-computed answers.
+    The agent must reason through scaling, ingredient ordering, and PDP area itself.
     """
     episode_context = observation_data.get("episode_context", {})
     draft_label = observation_data.get("draft_label", {})
-    lab_sample = episode_context.get("lab_sample_size_g", 1.0)
-
-    # Pre-compute for multiple possible serving sizes
-    # (the model needs to pick the right RACC-based serving size)
-    draft_serving = draft_label.get("serving_size_g", 30)
-    best_guess_racc, matched_category = _guess_racc_grams(
-        episode_context.get("food_category_description", ""),
-        episode_context.get("physical_form", "bulk"),
-    )
-    # Single-serving container: FDA rule — if label_format is single_serving_container,
-    # the serving size = total package weight, not the RACC.
-    total_package = episode_context.get("total_package_weight_g", 0)
-    if draft_label.get("label_format") == "single_serving_container" and total_package > 0:
-        best_guess_racc = float(total_package)
-        matched_category = f"Single-serving container — serving = package weight ({total_package}g)"
-    candidate_servings = sorted(set([best_guess_racc, 30, 40, 60, draft_serving]))
-
-    # Pre-compute ingredient order
-    correct_ingredient_order = _precompute_ingredient_order(episode_context)
-
-    # Pre-compute PDP area and type size
-    pdp_area, min_type_size = _compute_pdp_and_type_size(episode_context)
-
-    # Build scaled nutrient tables for each candidate serving size
-    food_desc = episode_context.get("food_category_description", "")
-    scaled_tables = ""
-    for s in candidate_servings:
-        scaled = _precompute_scaled_nutrients(episode_context, s)
-        best_guess_label = (
-            f"  ← BEST GUESS for '{food_desc}' (matched: {matched_category})"
-            if s == best_guess_racc else ""
-        )
-        scaled_tables += f"\n### If serving_size_g = {s}{best_guess_label}  (scale = {s}/{lab_sample} = {s/lab_sample:.4f})\n"
-        for k, v in scaled.items():
-            scaled_tables += f"  {k}: {v:.4f}\n"
 
     prompt = (
         "You are correcting a draft FDA Nutrition Facts label. The draft contains errors.\n\n"
         f"## Episode Context\n```json\n{json.dumps(episode_context, indent=2)}\n```\n\n"
         f"## Draft Label (contains errors)\n```json\n{json.dumps(draft_label, indent=2)}\n```\n\n"
-        "## PRE-COMPUTED VALUES (use these — do NOT recompute)\n\n"
-        f"### Correct ingredient order (by finished weight after {episode_context.get('moisture_loss_pct', 0):.1f}% moisture loss)\n"
-        f"  {json.dumps(correct_ingredient_order)}\n\n"
-        f"### PDP area = {pdp_area:.2f} sq in → minimum type size = {min_type_size} inch\n\n"
-        f"### Scaled nutrients (UNROUNDED) for candidate serving sizes:\n"
-        f"{scaled_tables}\n"
         "## YOUR TASK\n\n"
-        "1. **Serving size**: Pick the correct serving_size_g from the RACC table for this food category.\n"
-        f"   - BEST GUESS for this product: {best_guess_racc}g (matched category: {matched_category})\n"
-        "   - Use this unless the food description clearly fits a different RACC category.\n"
-        "   - For bulk: serving = RACC. For discrete units: if unit is 50-200% of RACC, unit = serving.\n\n"
-        "2. **Nutrients**: Use the pre-computed scaled values for your chosen serving size above.\n"
-        "   Apply FDA rounding (round-half-UP, i.e. floor(value/increment + 0.5) * increment):\n"
+        "1. **Serving size**: Determine the correct serving_size_g from 21 CFR 101.12 RACC for this food category.\n"
+        "   - For bulk products: serving = RACC. For discrete units: if one unit is 50-200% of RACC, one unit IS the serving.\n"
+        "   - For single_serving_container: serving = total_package_weight_g.\n\n"
+        "2. **Nutrients**: Scale each lab nutrient to your serving size:\n"
+        "     nutrient_per_serving = (lab_nutrient / lab_sample_size_g) * serving_size_g\n"
+        "   Then apply FDA round-half-UP (floor(value/increment + 0.5) * increment):\n"
         "   - Calories: <5→0, 5-50→nearest 5, >50→nearest 10\n"
         "   - Fat/sat fat/trans fat: <0.5→0, 0.5-5→nearest 0.5, >5→nearest 1\n"
         "   - Cholesterol: <2→0, ≥5→nearest 5mg\n"
@@ -414,17 +371,27 @@ def _build_user_prompt(observation_data: dict) -> str:
         "   - Calcium: <5→0, 5-140→nearest 10, >140→nearest 20\n"
         "   - Potassium: <5→0, 5-140→nearest 5, >140→nearest 10\n\n"
         "3. **Atwater calories**: energy_kcal = round_calories(9 × UNROUNDED_fat + 4 × UNROUNDED_carb + 4 × UNROUNDED_protein)\n"
-        "   Use the UNROUNDED scaled values, NOT the rounded ones.\n\n"
-        "4. **%DV**: Use ROUNDED declared values: %DV = floor(rounded_value / DRV × 100 + 0.5)\n"
+        "   Use UNROUNDED scaled values, not the rounded declared values.\n\n"
+        "4. **%DV**: %DV = floor(rounded_declared_value / DRV × 100 + 0.5)\n"
         "   DRVs: fat=78g, sat_fat=20g, cholesterol=300mg, sodium=2300mg, carb=275g,\n"
         "   fiber=28g, added_sugars=50g, protein=50g, vit_d=20mcg, calcium=1300mg,\n"
         "   iron=18mg, potassium=4700mg. trans_fat and total_sugars → null.\n\n"
-        "5. **Ingredient list**: Use the pre-computed order above.\n\n"
-        "6. **Type size**: declared_type_size_inch must be >= " + str(min_type_size) + "\n\n"
-        "7. **Health claims**: Set to [] (empty list). Never include claims unless clearly substantiated.\n\n"
+        "5. **Ingredient list**: Sort ingredients by FINISHED weight (after moisture loss).\n"
+        "   - total_moisture_loss = total_as_added_weight × (moisture_loss_pct / 100)\n"
+        "   - Distribute moisture loss proportionally among moisture_contributing ingredients only.\n"
+        "   - finished_weight_i = as_added_i − (as_added_i / mc_total) × total_moisture_loss\n"
+        "   - Non-moisture-contributing ingredients keep their as-added weight.\n"
+        "   - Sort descending by finished weight.\n\n"
+        "6. **Type size**: Compute PDP area from container dimensions:\n"
+        "   - Rectangular: area = height_in × width_in\n"
+        "   - Cylindrical: area = height_in × (π × diameter_in) / num_display_panels\n"
+        "   - Min type size: ≤5 sq in → 0.0625\", 5-25 → 0.125\", 25-100 → 0.1875\", >100 → 0.25\"\n"
+        "   - declared_type_size_inch must be ≥ minimum.\n\n"
+        "7. **Health claims**: Set to [] unless clearly substantiated by nutrient values.\n\n"
         "Return ONLY a JSON object with keys: serving_size_g, label_format, declared_type_size_inch,\n"
         "nutrients, percent_dvs, ingredient_list, health_claims.\n"
-        "No explanation, no markdown wrapping."
+        "No explanation, no markdown wrapping.\n\n"
+        "You will receive feedback after each attempt. Use all available steps to improve your score."
     )
     return prompt
 
@@ -569,7 +536,7 @@ def run_baseline_agent() -> dict[str, float]:
                 logger.warning("Could not parse JSON from LLM response — task=%s step=%d", task_id, step_number)
                 corrected_label = {}
 
-            all_actions.append(corrected_label)
+            all_actions.append({"label": corrected_label, "final_submission": done})
 
             # Submit to local environment
             step_result = local_env.step(FDAAction(label=corrected_label))

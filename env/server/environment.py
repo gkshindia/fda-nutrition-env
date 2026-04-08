@@ -35,34 +35,37 @@ TASKS = {
     "task_easy": {
         "task_id": "task_easy",
         "name": "Easy — Fix label errors",
-        "description": "A Nutrition Facts label with 3 injected errors "
-        "(wrong %DV, wrong ingredient order, type size violation). "
+        "description": "A Nutrition Facts label with 5 injected errors: "
+        "two wrong %DVs, wrong ingredient order, type size below minimum, "
+        "and one wrong nutrient rounding. "
         "Correct all errors and submit the fixed label. "
         "You will receive feedback after each attempt. "
-        "Episode ends when score >= 0.90 or you set final_submission=true.",
+        "Episode ends when you set final_submission=true or reach the step limit.",
         "difficulty": "easy",
         "max_steps": MAX_STEPS_SAFETY_CAP,
     },
     "task_medium": {
         "task_id": "task_medium",
-        "name": "Medium — Fix label errors with cross-step issues",
-        "description": "A Nutrition Facts label with 5 injected errors "
-        "including wrong nutrient rounding, wrong %DV, wrong ingredient "
-        "order, and a serving size inconsistency. Correct all errors. "
+        "name": "Medium — Fix label errors with cascading issues",
+        "description": "A Nutrition Facts label with 7 injected errors: "
+        "three wrong nutrient roundings, two wrong %DVs (one cascades from "
+        "a wrong rounding), wrong ingredient order (non-adjacent swap), "
+        "and a serving size inconsistency. Correct all errors. "
         "You will receive feedback after each attempt. "
-        "Episode ends when score >= 0.90 or you set final_submission=true.",
+        "Episode ends when you set final_submission=true or reach the step limit.",
         "difficulty": "medium",
         "max_steps": MAX_STEPS_SAFETY_CAP,
     },
     "task_hard": {
         "task_id": "task_hard",
-        "name": "Hard — Fix label errors with cascading issues",
-        "description": "A Nutrition Facts label with 7 injected errors "
-        "including wrong nutrient roundings, an unsupported health claim, "
-        "Atwater calorie inconsistency, wrong ingredient order, and wrong "
-        "%DV. Correct all errors. "
+        "name": "Hard — Fix label errors with full cascade",
+        "description": "A Nutrition Facts label with 10 injected errors: "
+        "four wrong nutrient roundings, an unsupported health claim, "
+        "Atwater calorie inconsistency, wrong ingredient order (rotated), "
+        "two wrong %DVs, and a serving size inconsistency that cascades "
+        "to all per-serving values. Correct all errors. "
         "You will receive feedback after each attempt. "
-        "Episode ends when score >= 0.90 or you set final_submission=true.",
+        "Episode ends when you set final_submission=true or reach the step limit.",
         "difficulty": "hard",
         "max_steps": MAX_STEPS_SAFETY_CAP,
     },
@@ -112,13 +115,6 @@ def _build_episode_context(episode: dict) -> dict:
         "container": episode["container"],
     }
 
-
-# Score threshold for early termination. When an agent's submission scores
-# at or above this value, the environment auto-finalizes the episode.
-# Rationale: FDA compliance tolerances (21 CFR 101.9) allow ±20% for most
-# nutrients (Class I ≤120%, Class II ≥80%). A score of 0.90 means nearly all
-# fields are correct — remaining errors are within real-world FDA tolerance.
-EARLY_STOP_SCORE_THRESHOLD = 0.90
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -214,6 +210,7 @@ class FDAEnvironment(Environment):
         )
 
         context = _build_episode_context(episode)
+        context["episode_seed"] = episode["episode_seed"]  # expose for /grader replay
 
         prompt = (
             f"{_SYSTEM_PROMPT}\n"
@@ -240,6 +237,9 @@ class FDAEnvironment(Environment):
         timeout_s: float | None = None,
         **kwargs: Any,
     ) -> FDAObservation:
+        if not self._state.ground_truth:
+            raise RuntimeError("Environment is not initialized. Call reset() before step().")
+
         self._state.step_count += 1
 
         result = grade(action.label, self._state.ground_truth)
@@ -263,14 +263,12 @@ class FDAEnvironment(Environment):
         is_final = (
             action.final_submission
             or self._state.step_count >= self._state.max_steps
-            or score >= EARLY_STOP_SCORE_THRESHOLD
             or plateau
         )
 
         stop_reason = (
             "final_submission" if action.final_submission
             else "max_steps"  if self._state.step_count >= self._state.max_steps
-            else "threshold"  if score >= EARLY_STOP_SCORE_THRESHOLD
             else "plateau"    if plateau
             else None
         )

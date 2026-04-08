@@ -113,7 +113,7 @@ def test_seed_reproducibility():
 # ── Test 8: multi-step improves score ────────────────────────────────────────
 
 def test_multi_step_revision_improves_score(env):
-    """Submit garbage first, then correct label — final score should be 1.0."""
+    """Submit garbage first, then correct label with final_submission — final score should be 1.0."""
     env.reset(task_id="task_easy", seed=42)
     gt = env.state.ground_truth
 
@@ -122,7 +122,7 @@ def test_multi_step_revision_improves_score(env):
     assert result1.done is False
     assert result1.reward < 0.3
 
-    # Step 2: submit correct label — auto-stops because score >= 0.90
+    # Step 2: submit correct label with explicit final_submission
     correct = _build_correct_label(
         rounded=gt["per_serving_rounded"],
         percent_dvs=gt["percent_dvs"],
@@ -131,8 +131,8 @@ def test_multi_step_revision_improves_score(env):
         declared_type_size_inch=gt["min_type_size_inch"],
         label_format=gt["label_format"],
     )
-    result2 = env.step(FDAAction(label=correct))  # no final_submission needed
-    assert result2.done is True  # auto-stopped: score 1.0 >= 0.90
+    result2 = env.step(FDAAction(label=correct, final_submission=True))
+    assert result2.done is True
     assert result2.reward == pytest.approx(1.0, abs=0.001)
 
 
@@ -155,10 +155,10 @@ def test_plateau_detection_auto_finalizes(env):
     assert result4.done is True
 
 
-# ── Test 10: score threshold auto-stop ────────────────────────────────────────
+# ── Test 10: final_submission stops episode immediately ───────────────────────
 
 def test_score_threshold_auto_stop(env):
-    """Environment auto-finalizes when score >= 0.90, even on step 1."""
+    """Episode ends when agent sets final_submission=True, regardless of score."""
     env.reset(task_id="task_easy", seed=42)
     gt = env.state.ground_truth
     correct = _build_correct_label(
@@ -169,8 +169,8 @@ def test_score_threshold_auto_stop(env):
         declared_type_size_inch=gt["min_type_size_inch"],
         label_format=gt["label_format"],
     )
-    # Perfect label on step 1 — should auto-stop without final_submission
-    result = env.step(FDAAction(label=correct))
+    # Perfect label with final_submission=True — should stop immediately
+    result = env.step(FDAAction(label=correct, final_submission=True))
     assert result.done is True
     assert env.state.step_count == 1  # stopped on first step
 
