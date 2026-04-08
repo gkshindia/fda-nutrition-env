@@ -29,6 +29,7 @@ import dotenv
 import httpx
 from openai import OpenAI
 
+from core.grader import grade
 from env.models import FDAAction
 from env.server.environment import FDAEnvironment
 
@@ -624,13 +625,14 @@ def run_baseline_agent() -> dict[str, float]:
 # SINGLE-TASK RUNNER (for UI /baseline/run endpoint)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_baseline_task(task_id: str, seed: int) -> dict:
+def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
     """
     Run the baseline agent for a single task and return full results for the UI.
 
     Returns:
         {
             "task_id": str,
+            "seed": int,
             "grader_score": float,
             "steps_taken": int,
             "rewards": list[float],
@@ -639,13 +641,14 @@ def run_baseline_task(task_id: str, seed: int) -> dict:
             "episode_context": dict,
         }
     """
-    logger.info("run_baseline_task  task=%s seed=%d  model=%s", task_id, seed, MODEL_NAME)
+    logger.info("run_baseline_task  task=%s seed=%s  model=%s", task_id, seed, MODEL_NAME)
     openai_client = _create_openai_client()
     local_env = FDAEnvironment()
     obs = local_env.reset(task_id=task_id, seed=seed)
 
     draft_label = obs.draft_label
     episode_context = obs.episode_context
+    actual_seed = obs.metadata.get("seed", seed)
 
     observation_data = {
         "text": obs.text,
@@ -703,15 +706,21 @@ def run_baseline_task(task_id: str, seed: int) -> dict:
             messages.append({"role": "assistant", "content": llm_response_text})
             messages.append({"role": "user", "content": revision_prompt})
 
+    # Get detailed group scores from final grading
+    ground_truth = local_env.state.ground_truth
+    grader_result = grade(best_label, ground_truth)
+
     logger.info("run_baseline_task  task=%s DONE  score=%.3f  steps=%d", task_id, best_score, step_number)
     return {
         "task_id": task_id,
+        "seed": actual_seed,
         "grader_score": best_score,
         "steps_taken": step_number,
         "rewards": all_rewards,
         "draft_label": draft_label,
         "corrected_label": best_label,
         "episode_context": episode_context,
+        "group_scores": grader_result["group_scores"],
     }
 
 

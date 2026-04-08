@@ -139,7 +139,7 @@ def test_multi_step_revision_improves_score(env):
 # ── Test 9: plateau detection auto-finalizes ─────────────────────────────────
 
 def test_plateau_detection_auto_finalizes(env):
-    """When score doesn't improve for 2 consecutive steps, auto-finalize."""
+    """When score doesn't improve for 3 consecutive steps, auto-finalize."""
     env.reset(task_id="task_easy", seed=42)
     # Step 1: garbage — sets baseline score
     result1 = env.step(FDAAction(label={}))
@@ -147,9 +147,12 @@ def test_plateau_detection_auto_finalizes(env):
     # Step 2: same garbage — no improvement (count=1)
     result2 = env.step(FDAAction(label={}))
     assert result2.done is False
-    # Step 3: same garbage — no improvement (count=2) → plateau → done
+    # Step 3: same garbage — no improvement (count=2)
     result3 = env.step(FDAAction(label={}))
-    assert result3.done is True
+    assert result3.done is False
+    # Step 4: same garbage — no improvement (count=3) → plateau → done
+    result4 = env.step(FDAAction(label={}))
+    assert result4.done is True
 
 
 # ── Test 10: score threshold auto-stop ────────────────────────────────────────

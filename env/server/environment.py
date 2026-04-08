@@ -152,18 +152,20 @@ def _build_feedback_text(
             status = "NEEDS FIX"
         lines.append(f"  {group_name}: {group_score:.2f} — {status}")
 
-    # Collect incorrect fields (without showing expected values)
-    incorrect_fields = [
-        field_name
+    # Collect incorrect fields with submitted vs expected values
+    incorrect_fields = {
+        field_name: detail
         for field_name, detail in field_details.items()
         if not detail.get("correct", False)
-    ]
+    }
 
     if incorrect_fields:
         lines.append("")
-        lines.append("Incorrect fields (expected values hidden):")
-        for field_name in incorrect_fields:
-            lines.append(f"  - {field_name}")
+        lines.append("Incorrect fields:")
+        for field_name, detail in incorrect_fields.items():
+            agent_val = detail.get("agent")
+            expected_val = detail.get("expected")
+            lines.append(f"  - {field_name}: submitted {agent_val}, expected {expected_val}")
     else:
         lines.append("")
         lines.append("All fields correct! Set final_submission=true to lock in your score.")
@@ -226,6 +228,10 @@ class FDAEnvironment(Environment):
             text=prompt,
             draft_label=episode["draft_label"],
             episode_context=context,
+            metadata={
+                "seed": episode["episode_seed"],
+                "episode_id": self._state.episode_id,
+            },
         )
 
     def step(
@@ -251,8 +257,8 @@ class FDAEnvironment(Environment):
         # Always keep the best label as the active one for grading
         self._state.agent_label = self._state.best_label
 
-        # Plateau detection: no improvement for 2 consecutive steps
-        plateau = self._state.no_improvement_count >= 2
+        # Plateau detection: no improvement for 3 consecutive steps
+        plateau = self._state.no_improvement_count >= 3
 
         is_final = (
             action.final_submission

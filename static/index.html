@@ -155,13 +155,20 @@ tailwind.config = {
         <button onclick="setDifficulty('hard')"   class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="hard">HARD</button>
       </div>
     </div>
-    <div class="flex flex-col items-end gap-1">
-      <button id="run-btn" onclick="runProtocol()"
-        class="bg-status-success text-black px-10 py-4 font-black uppercase tracking-tighter text-sm flex items-center gap-2">
-        <span id="run-btn-text">RUN BASELINE PROTOCOL</span>
-        <span id="run-btn-icon" class="material-symbols-outlined">arrow_forward</span>
-      </button>
-      <span class="text-[10px] text-neutral-400">Runs GPT-4o-mini · ~20–40 seconds</span>
+    <div class="flex items-center gap-4">
+      <div class="flex flex-col gap-1">
+        <label class="text-[10px] font-bold uppercase tracking-widest text-neutral-400">Seed (optional)</label>
+        <input id="seed-input" type="number" min="0" placeholder="random"
+          class="bg-white/10 border border-white/30 text-white text-xs font-mono px-3 py-2 w-28 placeholder:text-neutral-500 focus:outline-none focus:border-white"/>
+      </div>
+      <div class="flex flex-col items-end gap-1">
+        <button id="run-btn" onclick="runProtocol()"
+          class="bg-status-success text-black px-10 py-4 font-black uppercase tracking-tighter text-sm flex items-center gap-2">
+          <span id="run-btn-text">RUN BASELINE PROTOCOL</span>
+          <span id="run-btn-icon" class="material-symbols-outlined">arrow_forward</span>
+        </button>
+        <span class="text-[10px] text-neutral-400">Runs GPT-4o-mini · ~20–40 seconds</span>
+      </div>
     </div>
   </section>
 
@@ -222,6 +229,80 @@ tailwind.config = {
     </div>
   </section>
 
+  <!-- API Explorer -->
+  <section class="bg-white border-2 border-black p-8">
+    <h3 class="text-xl font-black uppercase tracking-tight mb-2 border-b-2 border-black pb-2">
+      API Explorer
+    </h3>
+    <p class="text-[10px] text-secondary mb-6">Interact with the environment endpoints directly. The hackathon evaluator calls these same endpoints.</p>
+
+    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      <!-- /reset -->
+      <div class="border border-black p-4 space-y-3">
+        <div class="flex items-center gap-2">
+          <span class="bg-primary text-white text-[9px] font-bold px-2 py-0.5">POST</span>
+          <span class="font-mono text-xs font-bold">/reset</span>
+        </div>
+        <div class="space-y-2">
+          <select id="api-task-select" class="w-full border border-black text-xs p-2 font-mono">
+            <option value="task_easy">task_easy</option>
+            <option value="task_medium">task_medium</option>
+            <option value="task_hard">task_hard</option>
+          </select>
+          <input id="api-reset-seed" type="number" min="0" placeholder="seed (optional)"
+            class="w-full border border-black text-xs p-2 font-mono placeholder:text-outline"/>
+        </div>
+        <button onclick="apiReset()" class="w-full bg-primary text-white text-[10px] font-bold uppercase py-2 hover:bg-tertiary transition-colors">
+          Reset Environment
+        </button>
+      </div>
+
+      <!-- /step -->
+      <div class="border border-black p-4 space-y-3">
+        <div class="flex items-center gap-2">
+          <span class="bg-primary text-white text-[9px] font-bold px-2 py-0.5">POST</span>
+          <span class="font-mono text-xs font-bold">/step</span>
+        </div>
+        <textarea id="api-step-action" rows="4" placeholder='{"label": {...}}'
+          class="w-full border border-black text-[10px] p-2 font-mono placeholder:text-outline resize-none"></textarea>
+        <button onclick="apiStep()" class="w-full bg-primary text-white text-[10px] font-bold uppercase py-2 hover:bg-tertiary transition-colors">
+          Submit Action
+        </button>
+      </div>
+
+      <!-- /state + other endpoints -->
+      <div class="border border-black p-4 space-y-3">
+        <div class="flex items-center gap-2">
+          <span class="bg-secondary text-white text-[9px] font-bold px-2 py-0.5">GET</span>
+          <span class="font-mono text-xs font-bold">Info Endpoints</span>
+        </div>
+        <div class="space-y-2">
+          <button onclick="apiCall('/tasks','GET')" class="w-full border border-black text-[10px] font-bold uppercase py-1.5 hover:bg-surface-container transition-colors">
+            /tasks
+          </button>
+          <button onclick="apiCall('/health','GET')" class="w-full border border-black text-[10px] font-bold uppercase py-1.5 hover:bg-surface-container transition-colors">
+            /health
+          </button>
+          <button onclick="apiCall('/state','GET')" class="w-full border border-black text-[10px] font-bold uppercase py-1.5 hover:bg-surface-container transition-colors">
+            /state
+          </button>
+          <button onclick="apiCall('/metadata','GET')" class="w-full border border-black text-[10px] font-bold uppercase py-1.5 hover:bg-surface-container transition-colors">
+            /metadata
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Response panel -->
+    <div class="mt-6 border border-black">
+      <div class="bg-inverse-surface text-inverse-on-surface px-4 py-2 flex justify-between items-center">
+        <span class="text-[10px] font-black uppercase tracking-widest">Response</span>
+        <span id="api-response-status" class="text-[10px] font-mono text-neutral-400">—</span>
+      </div>
+      <pre id="api-response-body" class="p-4 text-[10px] font-mono overflow-auto max-h-[300px] bg-surface-container-lowest text-on-surface whitespace-pre-wrap">No request sent yet.</pre>
+    </div>
+  </section>
+
   <!-- Run History -->
   <section class="bg-white border-2 border-black overflow-hidden">
     <div class="p-4 bg-inverse-surface text-inverse-on-surface text-sm font-black uppercase tracking-widest flex items-center justify-between">
@@ -235,13 +316,14 @@ tailwind.config = {
             <th class="p-4 text-[10px] font-black uppercase border-r border-black">#</th>
             <th class="p-4 text-[10px] font-black uppercase border-r border-black">Difficulty</th>
             <th class="p-4 text-[10px] font-black uppercase border-r border-black">Product</th>
+            <th class="p-4 text-[10px] font-black uppercase border-r border-black">Seed</th>
             <th class="p-4 text-[10px] font-black uppercase border-r border-black">Score</th>
             <th class="p-4 text-[10px] font-black uppercase border-r border-black">Steps</th>
             <th class="p-4 text-[10px] font-black uppercase">Status</th>
           </tr>
         </thead>
         <tbody id="history-tbody" class="text-xs font-medium">
-          <tr><td colspan="6" class="p-4 text-[10px] text-outline text-center">No runs this session.</td></tr>
+          <tr><td colspan="7" class="p-4 text-[10px] text-outline text-center">No runs this session.</td></tr>
         </tbody>
       </table>
     </div>
@@ -386,10 +468,13 @@ async function runProtocol() {
 
   try {
     const cfg = TASK_CONFIG[selectedDifficulty];
+    const seedVal = document.getElementById("seed-input").value.trim();
+    const payload = { task_id: cfg.task_id };
+    if (seedVal !== "") payload.seed = parseInt(seedVal, 10);
     const resp = await fetch(`${BASE_URL}/baseline/run`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ task_id: cfg.task_id }),
+      body: JSON.stringify(payload),
     });
     if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
     const data = await resp.json();
@@ -410,7 +495,7 @@ async function runProtocol() {
 // ── Update all UI from API response ───────────────────────────────────
 function updateUI(data) {
   const { grader_score, steps_taken, rewards, draft_label,
-          corrected_label, episode_context } = data;
+          corrected_label, episode_context, seed } = data;
 
   const scorePct = Math.round(grader_score * 100);
   const maxSteps = 10;
@@ -433,7 +518,7 @@ function updateUI(data) {
 
   // Session history
   sessionHistory.push({ difficulty: selectedDifficulty, score: scorePct,
-    product: desc, steps: steps_taken, ts: new Date() });
+    product: desc, steps: steps_taken, seed: seed, ts: new Date() });
   renderScoreHistoryGrid();
 
   // Un-blur corrected panel first (before label render so it's never mid-crash)
@@ -447,7 +532,7 @@ function updateUI(data) {
   renderLabel("corrected-label-wrap", corrected_label, corrected_label, episode_context, servings, true);
 
   // Grader breakdown
-  renderGraderBreakdown(draft_label, corrected_label, scorePct);
+  renderGraderBreakdown(data.group_scores || {}, scorePct);
 
   // History table
   addHistoryRow(data, scorePct, desc);
@@ -464,8 +549,11 @@ function renderLabel(wrapId, label, corrected, ctx, servings, isCorrection) {
   const corServing = corrected.serving_size_g || 0;
 
   const diffClass = (val, ref) => {
-    if (val === null && ref === null) return "";
-    if (String(val) !== String(ref)) return isCorrection ? "label-row-ok" : "label-row-error";
+    // Treat null, undefined, and missing as equivalent
+    const a = (val === null || val === undefined) ? null : val;
+    const b = (ref === null || ref === undefined) ? null : ref;
+    if (a === null && b === null) return "";
+    if (String(a) !== String(b)) return isCorrection ? "label-row-ok" : "label-row-error";
     return "";
   };
 
@@ -548,48 +636,27 @@ function fmtVal(val, unit) {
 }
 
 // ── Grader breakdown ──────────────────────────────────────────────────
-function renderGraderBreakdown(draft, corrected, scorePct) {
+function renderGraderBreakdown(groupScores, scorePct) {
   const container = document.getElementById("grader-breakdown");
-
-  // Infer per-group pass/fail by comparing draft vs corrected
-  function groupPassed(key) {
-    if (key === "serving_size_g")
-      return String(draft.serving_size_g) === String(corrected.serving_size_g);
-    if (key === "nutrients")
-      return JSON.stringify(draft.nutrients) === JSON.stringify(corrected.nutrients);
-    if (key === "percent_dvs")
-      return JSON.stringify(draft.percent_dvs) === JSON.stringify(corrected.percent_dvs);
-    if (key === "ingredient_list")
-      return JSON.stringify(draft.ingredient_list) === JSON.stringify(corrected.ingredient_list);
-    if (key === "declared_type_size_inch")
-      return String(draft.declared_type_size_inch) === String(corrected.declared_type_size_inch);
-    if (key === "health_claims")
-      return JSON.stringify(corrected.health_claims) === "[]";
-    if (key === "atwater_consistency") {
-      const n = corrected.nutrients || {};
-      const raw = 9 * (n.total_fat_g||0) + 4 * (n.total_carbohydrate_g||0) + 4 * (n.protein_g||0);
-      const rounded = raw < 5 ? 0 : raw <= 50 ? Math.floor(raw/5+0.5)*5 : Math.floor(raw/10+0.5)*10;
-      return Math.abs(rounded - (n.energy_kcal||0)) <= 5;
-    }
-    return false;
-  }
 
   let rows = "";
   for (const g of GRADER_GROUPS) {
-    const passed = groupPassed(g.key);
-    const barW   = Math.round(g.weight * 100);
-    const barCls = passed ? "bg-primary" : "bg-error";
-    const icon   = passed ? "✓" : "✗";
+    const groupScore = groupScores[g.key];
+    const pct = groupScore != null ? Math.round(groupScore * 100) : 0;
+    const passed = pct >= 100;
+    const barW = Math.round(g.weight * 100);
+    const scoreCls = passed ? "bg-primary" : "bg-error";
+    const icon = passed ? "✓" : "✗";
     const iconCls = passed ? "text-status-success" : "text-error";
     rows += `
       <div class="space-y-1">
         <div class="flex justify-between items-center text-[10px] font-bold uppercase">
           <span class="${iconCls} mr-2">${icon}</span>
           <span class="flex-1">${g.label}</span>
-          <span class="font-mono ml-4">${barW}% weight</span>
+          <span class="font-mono ml-4">${pct}% · ${barW}% weight</span>
         </div>
         <div class="h-2 w-full bg-surface-container border border-black">
-          <div class="h-full ${barCls}" style="width:${barW}%"></div>
+          <div class="h-full ${scoreCls}" style="width:${pct}%"></div>
         </div>
       </div>`;
   }
@@ -638,10 +705,12 @@ function addHistoryRow(data, scorePct, desc) {
 
   const tr = document.createElement("tr");
   tr.className = "border-b border-black hover:bg-surface-container-low transition-colors";
+  const runSeed = data.seed != null ? data.seed : "—";
   tr.innerHTML = `
     <td class="p-4 border-r border-black font-mono">#${String(n).padStart(3,"0")}</td>
     <td class="p-4 border-r border-black font-bold uppercase">${selectedDifficulty}</td>
     <td class="p-4 border-r border-black max-w-[180px] truncate text-[11px]">${desc || "—"}</td>
+    <td class="p-4 border-r border-black font-mono text-[10px]">${runSeed}</td>
     <td class="p-4 border-r border-black font-mono font-bold ${scorePct >= 90 ? "text-status-success" : scorePct >= 70 ? "text-status-warning" : "text-error"}">${scorePct}%</td>
     <td class="p-4 border-r border-black font-mono">${data.steps_taken}/10</td>
     <td class="p-4">
@@ -650,6 +719,47 @@ function addHistoryRow(data, scorePct, desc) {
       </span>
     </td>`;
   tbody.insertBefore(tr, tbody.firstChild);
+}
+
+// ── API Explorer functions ────────────────────────────────────────────
+async function apiCall(endpoint, method, body) {
+  const statusEl = document.getElementById("api-response-status");
+  const bodyEl = document.getElementById("api-response-body");
+  statusEl.textContent = `${method} ${endpoint} …`;
+  bodyEl.textContent = "Loading…";
+  try {
+    const opts = { method };
+    if (body) {
+      opts.headers = { "Content-Type": "application/json" };
+      opts.body = JSON.stringify(body);
+    }
+    const resp = await fetch(`${BASE_URL}${endpoint}`, opts);
+    const data = await resp.json();
+    statusEl.textContent = `${resp.status} ${resp.statusText} — ${method} ${endpoint}`;
+    bodyEl.textContent = JSON.stringify(data, null, 2);
+  } catch (err) {
+    statusEl.textContent = `ERROR — ${method} ${endpoint}`;
+    bodyEl.textContent = err.message;
+  }
+}
+
+async function apiReset() {
+  const taskId = document.getElementById("api-task-select").value;
+  const seedVal = document.getElementById("api-reset-seed").value.trim();
+  const payload = { task_id: taskId };
+  if (seedVal !== "") payload.seed = parseInt(seedVal, 10);
+  await apiCall("/reset", "POST", payload);
+}
+
+async function apiStep() {
+  const raw = document.getElementById("api-step-action").value.trim();
+  if (!raw) { alert("Paste a JSON action first."); return; }
+  try {
+    const action = JSON.parse(raw);
+    await apiCall("/step", "POST", { action });
+  } catch (err) {
+    alert("Invalid JSON: " + err.message);
+  }
 }
 
 // Init
