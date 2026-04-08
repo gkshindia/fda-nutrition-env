@@ -20,6 +20,7 @@ Inference log format (hackathon requirement):
 from __future__ import annotations
 
 import json
+import logging
 import os
 import re
 import sys
@@ -30,6 +31,8 @@ from openai import OpenAI
 
 from env.models import FDAAction
 from env.server.environment import FDAEnvironment
+
+logger = logging.getLogger("fda.baseline")
 
 # Load .env file from project root (does not override existing shell env vars)
 dotenv.load_dotenv()
@@ -200,10 +203,12 @@ def _create_openai_client() -> OpenAI:
     # When API_BASE_URL is NOT set, we're hitting OpenAI directly and need OPENAI_API_KEY.
     if API_BASE_URL:
         api_key = HF_TOKEN or OPENAI_API_KEY or "not-needed"
-        return OpenAI(api_key=api_key, base_url=API_BASE_URL)
+        logger.info("LLM client → %s  model=%s", API_BASE_URL, MODEL_NAME)
+        return OpenAI(api_key=api_key, base_url=API_BASE_URL, timeout=90.0)
     else:
         api_key = OPENAI_API_KEY or HF_TOKEN or "not-needed"
-        return OpenAI(api_key=api_key)
+        logger.info("LLM client → openai  model=%s", MODEL_NAME)
+        return OpenAI(api_key=api_key, timeout=90.0)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -555,12 +560,12 @@ def run_baseline_agent() -> dict[str, float]:
                 llm_response_text = completion.choices[0].message.content or ""
             except Exception as exception:
                 llm_response_text = ""
-                print(f"  [WARNING] LLM call failed: {exception}", file=sys.stderr)
+                logger.warning("LLM call failed at step %d: %s", step_number, exception)
 
             # Parse the corrected label
             corrected_label = _extract_json_from_response(llm_response_text)
             if corrected_label is None:
-                print(f"  [WARNING] Could not parse JSON from LLM response for {task_id} step {step_number}", file=sys.stderr)
+                logger.warning("Could not parse JSON from LLM response — task=%s step=%d", task_id, step_number)
                 corrected_label = {}
 
             all_actions.append(corrected_label)
@@ -586,7 +591,7 @@ def run_baseline_agent() -> dict[str, float]:
                 revision_prompt = _build_revision_prompt(corrected_label, feedback_text)
                 messages.append({"role": "assistant", "content": llm_response_text})
                 messages.append({"role": "user", "content": revision_prompt})
-                print(f"  → {task_id} step {step_number}: score={step_reward:.3f} (revising...)", file=sys.stderr)
+                logger.info("task=%s step=%d score=%.3f → revising", task_id, step_number, step_reward)
 
         # Final grader call for official score
         grader_response = http_client.post(
@@ -609,10 +614,105 @@ def run_baseline_agent() -> dict[str, float]:
         )
 
         task_scores[task_id] = grader_score
-        print(f"  → {task_id}: final_score={grader_score:.3f} (after {step_number} steps)", file=sys.stderr)
+        logger.info("task=%s DONE  final_score=%.3f  steps=%d", task_id, grader_score, step_number)
 
     http_client.close()
     return task_scores
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# SINGLE-TASK RUNNER (for UI /baseline/run endpoint)
+# ─────────────────────────────────────────────────────────────────────────────
+
+def run_baseline_task(task_id: str, seed: int) -> dict:
+    """
+    Run the baseline agent for a single task and return full results for the UI.
+
+    Returns:
+        {
+            "task_id": str,
+            "grader_score": float,
+            "steps_taken": int,
+            "rewards": list[float],
+            "draft_label": dict,
+            "corrected_label": dict,   # label from the best-scoring step
+            "episode_context": dict,
+        }
+    """
+    logger.info("run_baseline_task  task=%s seed=%d  model=%s", task_id, seed, MODEL_NAME)
+    openai_client = _create_openai_client()
+    local_env = FDAEnvironment()
+    obs = local_env.reset(task_id=task_id, seed=seed)
+
+    draft_label = obs.draft_label
+    episode_context = obs.episode_context
+
+    observation_data = {
+        "text": obs.text,
+        "draft_label": draft_label,
+        "episode_context": episode_context,
+    }
+
+    messages = [
+        {"role": "system", "content": FDA_REGULATORY_RULES},
+        {"role": "user", "content": _build_user_prompt(observation_data)},
+    ]
+
+    all_rewards: list[float] = []
+    best_score = 0.0
+    best_label: dict = {}
+    done = False
+    step_number = 0
+
+    while not done:
+        step_number += 1
+        logger.info("  LLM call step=%d — sending request to %s", step_number, API_BASE_URL or "openai")
+
+        try:
+            completion = openai_client.chat.completions.create(
+                model=MODEL_NAME,
+                messages=messages,
+                max_completion_tokens=4096,
+                temperature=0.0,
+            )
+            llm_response_text = completion.choices[0].message.content or ""
+            logger.info("  LLM call step=%d — response received (%d chars)", step_number, len(llm_response_text))
+        except Exception as exception:
+            llm_response_text = ""
+            logger.warning("LLM call failed at step %d: %s", step_number, exception)
+
+        corrected_label = _extract_json_from_response(llm_response_text) or {}
+        step_result = local_env.step(FDAAction(label=corrected_label))
+        step_reward = step_result.reward if step_result.reward is not None else 0.0
+        done = step_result.done
+        all_rewards.append(step_reward)
+
+        improved = step_reward > best_score
+        if improved:
+            best_score = step_reward
+            best_label = corrected_label
+
+        logger.info(
+            "  step=%d  score=%.3f  best=%.3f  %s",
+            step_number, step_reward, best_score,
+            "↑ improved" if improved else "↔ no change",
+        )
+
+        if not done:
+            revision_prompt = _build_revision_prompt(corrected_label, step_result.text)
+            messages.append({"role": "assistant", "content": llm_response_text})
+            messages.append({"role": "user", "content": revision_prompt})
+
+    logger.info("run_baseline_task  task=%s DONE  score=%.3f  steps=%d", task_id, best_score, step_number)
+    return {
+        "task_id": task_id,
+        "grader_score": best_score,
+        "steps_taken": step_number,
+        "rewards": all_rewards,
+        "draft_label": draft_label,
+        "corrected_label": best_label,
+        "episode_context": episode_context,
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────────────
