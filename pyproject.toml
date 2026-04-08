@@ -16,7 +16,7 @@ dev = []
 server = "env.server.app:main"
 
 [tool.hatch.build.targets.wheel]
-packages = ["env"]
+packages = ["env", "core", "data"]
 
 [build-system]
 requires = ["hatchling"]
