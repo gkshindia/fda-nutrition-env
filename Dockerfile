@@ -13,6 +13,7 @@ COPY data/ data/
 COPY core/ core/
 COPY env/ env/
 COPY baseline.py .
+COPY inference.py .
 COPY openenv.yaml .
 
 # Install dependencies (locked)
