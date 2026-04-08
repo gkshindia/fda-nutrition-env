@@ -1,13 +1,10 @@
 import logging
-import os
 import threading
 import time
 
 from fastapi import Body, FastAPI, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
 from fastapi.routing import APIRoute
-from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 from openenv.core.env_server.serialization import deserialize_action, serialize_observation
 from openenv.core.env_server.http_server import create_app
@@ -61,16 +58,8 @@ async def log_requests(request: Request, call_next):
     logger.info("← %s %s  %d  (%.0f ms)", request.method, request.url.path, response.status_code, elapsed_ms)
     return response
 
-_static_dir = os.path.join(os.path.dirname(__file__), "..", "..", "static")
-if os.path.isdir(_static_dir):
-    app.mount("/static", StaticFiles(directory=_static_dir), name="static")
-
-
 @app.get("/", include_in_schema=False)
 def serve_root():
-    index = os.path.join(_static_dir, "index.html")
-    if os.path.exists(index):
-        return FileResponse(index)
     return {"status": "FDA Nutrition Facts Panel API", "docs": "/docs"}
 
 app.add_middleware(

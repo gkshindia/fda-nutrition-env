@@ -14,7 +14,6 @@ COPY core/ core/
 COPY env/ env/
 COPY baseline.py .
 COPY openenv.yaml .
-COPY static/ static/
 
 # Install dependencies (locked)
 RUN uv sync --no-dev --frozen

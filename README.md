@@ -166,7 +166,6 @@ echo "OPENAI_API_KEY=sk-..." > .env
 uv run server
 # → Server running at http://localhost:7860
 # → API docs at http://localhost:7860/docs
-# → Dashboard at http://localhost:7860
 
 # Run the baseline agent (in a separate terminal)
 uv run python baseline.py
@@ -217,7 +216,7 @@ fda-nutrition-env/
 │   └── server/
 │       ├── app.py                # FastAPI application. Defines all HTTP endpoints,
 │       │                         # manages the shared environment instance with thread
-│       │                         # locking, serves the static UI dashboard.
+│       │                         # locking for persistent episode state across requests.
 │       │
 │       └── environment.py        # FDAEnvironment class — implements the OpenEnv interface.
 │                                 # Handles multi-step episode lifecycle: reset, step,
@@ -240,12 +239,6 @@ fda-nutrition-env/
 │   │
 │   └── test_http_endpoints.py    # HTTP integration test — verifies /reset → /step → /state
 │                                 # persistence across requests using FastAPI TestClient
-│
-├── static/
-│   └── index.html                # Single-page dashboard. Shows API Explorer (manual
-│                                 # reset/step), visual Nutrition Facts label comparison
-│                                 # (draft vs. corrected), and grader breakdown panel.
-│                                 # "Run LLM Agent" button triggers /baseline/run live.
 │
 ├── server/
 │   └── Dockerfile                # Docker image for HuggingFace Spaces deployment
