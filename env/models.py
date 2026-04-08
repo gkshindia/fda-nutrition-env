@@ -14,6 +14,11 @@ class FDAAction(Action):
         "serving_size_g, label_format, declared_type_size_inch, "
         "nutrients, percent_dvs, ingredient_list, health_claims",
     )
+    final_submission: bool = Field(
+        default=False,
+        description="Set to true to indicate this is the agent's final answer. "
+        "Ends the episode early even if steps remain.",
+    )
 
 
 class FDAObservation(Observation):
@@ -38,3 +43,6 @@ class FDAState(State):
     ground_truth: dict[str, Any] = Field(default_factory=dict)
     agent_label: Optional[dict[str, Any]] = Field(default=None)
     completed: bool = Field(default=False)
+    best_label: Optional[dict[str, Any]] = Field(default=None)
+    best_score: float = Field(default=0.0)
+    no_improvement_count: int = Field(default=0)

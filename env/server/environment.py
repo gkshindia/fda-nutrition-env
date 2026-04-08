@@ -25,24 +25,31 @@ from env.models import FDAAction, FDAObservation, FDAState
 # TASKS REGISTRY
 # ─────────────────────────────────────────────────────────────────────────────
 
+# Safety cap: maximum steps before forced termination, regardless of score.
+MAX_STEPS_SAFETY_CAP = 10
+
 TASKS = {
     "task_easy": {
         "task_id": "task_easy",
         "name": "Easy — Fix label errors",
         "description": "A Nutrition Facts label with 3 injected errors "
         "(wrong %DV, wrong ingredient order, type size violation). "
-        "Correct all errors and submit the fixed label.",
+        "Correct all errors and submit the fixed label. "
+        "You will receive feedback after each attempt. "
+        "Episode ends when score >= 0.90 or you set final_submission=true.",
         "difficulty": "easy",
-        "max_steps": 1,
+        "max_steps": MAX_STEPS_SAFETY_CAP,
     },
     "task_medium": {
         "task_id": "task_medium",
         "name": "Medium — Fix label errors with cross-step issues",
         "description": "A Nutrition Facts label with 5 injected errors "
         "including wrong nutrient rounding, wrong %DV, wrong ingredient "
-        "order, and a serving size inconsistency. Correct all errors.",
+        "order, and a serving size inconsistency. Correct all errors. "
+        "You will receive feedback after each attempt. "
+        "Episode ends when score >= 0.90 or you set final_submission=true.",
         "difficulty": "medium",
-        "max_steps": 1,
+        "max_steps": MAX_STEPS_SAFETY_CAP,
     },
     "task_hard": {
         "task_id": "task_hard",
@@ -50,9 +57,11 @@ TASKS = {
         "description": "A Nutrition Facts label with 7 injected errors "
         "including wrong nutrient roundings, an unsupported health claim, "
         "Atwater calorie inconsistency, wrong ingredient order, and wrong "
-        "%DV. Correct all errors.",
+        "%DV. Correct all errors. "
+        "You will receive feedback after each attempt. "
+        "Episode ends when score >= 0.90 or you set final_submission=true.",
         "difficulty": "hard",
-        "max_steps": 1,
+        "max_steps": MAX_STEPS_SAFETY_CAP,
     },
 }
 
@@ -99,6 +108,64 @@ def _build_episode_context(episode: dict) -> dict:
         "moisture_loss_pct": episode["moisture_loss_pct"],
         "container": episode["container"],
     }
+
+
+# Score threshold for early termination. When an agent's submission scores
+# at or above this value, the environment auto-finalizes the episode.
+# Rationale: FDA compliance tolerances (21 CFR 101.9) allow ±20% for most
+# nutrients (Class I ≤120%, Class II ≥80%). A score of 0.90 means nearly all
+# fields are correct — remaining errors are within real-world FDA tolerance.
+EARLY_STOP_SCORE_THRESHOLD = 0.90
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# FEEDBACK BUILDER
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _build_feedback_text(
+    grader_result: dict, step_number: int, max_steps: int,
+) -> str:
+    """
+    Build human-readable feedback from grader result.
+
+    Reveals which groups and fields are wrong, but NOT the expected values.
+    """
+    score = grader_result["score"]
+    group_scores = grader_result["group_scores"]
+    field_details = grader_result["field_details"]
+
+    lines = [
+        f"Score: {score:.3f} (step {step_number} of {max_steps})",
+        f"You have {max_steps - step_number} revision(s) remaining. "
+        f"Set final_submission=true to submit early.",
+        "",
+        "Group scores:",
+    ]
+
+    for group_name, group_score in group_scores.items():
+        if group_score >= 1.0:
+            status = "OK"
+        else:
+            status = "NEEDS FIX"
+        lines.append(f"  {group_name}: {group_score:.2f} — {status}")
+
+    # Collect incorrect fields (without showing expected values)
+    incorrect_fields = [
+        field_name
+        for field_name, detail in field_details.items()
+        if not detail.get("correct", False)
+    ]
+
+    if incorrect_fields:
+        lines.append("")
+        lines.append("Incorrect fields (expected values hidden):")
+        for field_name in incorrect_fields:
+            lines.append(f"  - {field_name}")
+    else:
+        lines.append("")
+        lines.append("All fields correct! Set final_submission=true to lock in your score.")
+
+    return "\n".join(lines)
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -159,15 +226,51 @@ class FDAEnvironment(Environment):
         **kwargs: Any,
     ) -> FDAObservation:
         self._state.step_count += 1
-        self._state.agent_label = action.label
-        self._state.completed = True
 
         result = grade(action.label, self._state.ground_truth)
         score = result["score"]
 
+        # Track best submission
+        if score > self._state.best_score:
+            self._state.best_score = score
+            self._state.best_label = action.label
+            self._state.no_improvement_count = 0
+        else:
+            self._state.no_improvement_count += 1
+
+        # Always keep the best label as the active one for grading
+        self._state.agent_label = self._state.best_label
+
+        # Plateau detection: no improvement for 2 consecutive steps
+        plateau = self._state.no_improvement_count >= 2
+
+        is_final = (
+            action.final_submission
+            or self._state.step_count >= self._state.max_steps
+            or score >= EARLY_STOP_SCORE_THRESHOLD
+            or plateau
+        )
+
+        if is_final:
+            self._state.completed = True
+            best = self._state.best_score
+            return FDAObservation(
+                text=f"Label submitted. Final score: {best:.3f}"
+                + (f" (best of {self._state.step_count} attempts)"
+                   if self._state.step_count > 1 else ""),
+                done=True,
+                reward=best,
+            )
+
+        # Non-final step: return feedback without revealing expected values
+        feedback_text = _build_feedback_text(
+            result, self._state.step_count, self._state.max_steps,
+        )
         return FDAObservation(
-            text=f"Label submitted. Score: {score:.3f}",
-            done=True,
+            text=feedback_text,
+            draft_label=action.label,  # echo back what agent submitted
+            episode_context={},
+            done=False,
             reward=score,
         )
 
