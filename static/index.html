@@ -1,0 +1,659 @@
+<!DOCTYPE html>
+<html class="light" lang="en">
+<head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>FDA REGULATORY PROTOCOL - DASHBOARD</title>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@700;800;900&family=Inter:wght@400;600;700;800&family=Georgia&display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<script id="tailwind-config">
+tailwind.config = {
+  darkMode: "class",
+  theme: {
+    extend: {
+      colors: {
+        "on-primary": "#e2e2e2", "secondary": "#5a5f66", "error": "#ba1a1a",
+        "on-surface": "#1a1c1c", "tertiary": "#3b3b3b", "surface-dim": "#dadada",
+        "outline": "#777777", "surface-container-high": "#e8e8e8",
+        "surface-container-lowest": "#ffffff", "primary-container": "#3b3b3b",
+        "background": "#f9f9f9", "surface-container": "#eeeeee",
+        "on-surface-variant": "#474747", "outline-variant": "#c6c6c6",
+        "inverse-on-surface": "#f1f1f1", "inverse-surface": "#2f3131",
+        "primary": "#000000", "surface": "#f9f9f9",
+        "surface-container-low": "#f3f3f3", "status-success": "#22c55e",
+        "status-warning": "#f59e0b"
+      },
+      borderRadius: { "DEFAULT": "0px", "lg": "0px", "xl": "0px", "full": "2px" },
+      fontFamily: { "headline": ["Public Sans","sans-serif"], "body": ["Inter","sans-serif"], "serif": ["Georgia","serif"] }
+    }
+  }
+}
+</script>
+<style>
+  .material-symbols-outlined { font-variation-settings:'FILL' 0,'wght' 400,'GRAD' 0,'opsz' 24; vertical-align:middle; }
+  ::-webkit-scrollbar { width:6px; } ::-webkit-scrollbar-track { background:#f3f3f3; } ::-webkit-scrollbar-thumb { background:#000; }
+  .label-row-error { background:#fff0f0; } .label-row-error span { color:#ba1a1a !important; }
+  .label-row-ok    { background:#f0fff4; } .label-row-ok    span { color:#166534 !important; }
+  .blurred { filter:blur(4px); pointer-events:none; user-select:none; }
+  @keyframes pulse-opacity { 0%,100%{opacity:1} 50%{opacity:.4} }
+  .running-pulse { animation:pulse-opacity 1.2s ease-in-out infinite; }
+  @keyframes indeterminate { 0%{left:-40%;width:40%} 60%{left:60%;width:40%} 100%{left:100%;width:40%} }
+  .bar-indeterminate { position:absolute; top:0; height:100%; background:white; animation:indeterminate 1.4s ease-in-out infinite; }
+  @keyframes blink-cursor { 0%,49%{opacity:1} 50%,100%{opacity:0} }
+  .blink { animation:blink-cursor 1s step-start infinite; }
+</style>
+</head>
+<body class="bg-surface font-body text-primary h-screen flex flex-col overflow-hidden">
+
+<!-- ── TOP NAV ─────────────────────────────────────────────────────────── -->
+<header class="bg-white font-headline font-bold tracking-tighter uppercase border-b-2 border-black flex justify-between items-center w-full px-4 h-16 shrink-0 z-50">
+  <div class="flex items-center gap-3">
+    <span class="material-symbols-outlined text-2xl">clinical_notes</span>
+    <h1 class="text-xl font-extrabold">FDA REGULATORY PROTOCOL</h1>
+  </div>
+  <nav class="hidden md:flex items-center h-full">
+    <a class="px-4 h-full flex items-center border-b-2 border-black font-label text-xs font-extrabold tracking-widest" href="#">DASHBOARD</a>
+  </nav>
+</header>
+
+<div class="flex flex-1 overflow-hidden">
+
+<!-- ── SIDEBAR ────────────────────────────────────────────────────────── -->
+<aside class="w-[280px] bg-white border-r-2 border-black hidden lg:flex flex-col overflow-y-auto shrink-0">
+
+  <!-- Entity -->
+  <section class="p-6 border-b border-black bg-surface-container-low">
+    <div class="text-[10px] font-black uppercase tracking-[0.2em] mb-3 text-outline">Current Entity</div>
+    <h2 id="sb-entity" class="text-sm font-bold leading-tight mb-3 uppercase">NO EPISODE LOADED</h2>
+    <div class="flex flex-wrap gap-2">
+      <span id="sb-difficulty-badge" class="bg-primary text-white text-[9px] px-2 py-1 font-bold">—</span>
+      <span id="sb-form-badge" class="border border-black text-[9px] px-2 py-1 font-bold">—</span>
+    </div>
+  </section>
+
+  <!-- Cycle Progress -->
+  <section class="p-6 border-b border-black">
+    <div class="flex justify-between items-end mb-2">
+      <span class="text-[10px] font-black uppercase tracking-widest">Cycle Progress</span>
+      <span id="sb-step-label" class="text-xs font-mono font-bold">—</span>
+    </div>
+    <div class="h-4 w-full bg-surface-container border border-black p-[2px]">
+      <div id="sb-step-bar" class="h-full bg-primary transition-all duration-500" style="width:0%"></div>
+    </div>
+  </section>
+
+  <!-- Compliance Score -->
+  <section class="p-6 border-b border-black">
+    <div class="text-[10px] font-black uppercase tracking-widest mb-3">Compliance Score</div>
+    <div class="flex items-baseline gap-2 mb-2">
+      <span id="sb-score-num" class="text-5xl font-black tracking-tighter">—</span>
+      <span class="text-xl font-bold">/100</span>
+    </div>
+    <div class="h-2 w-full bg-surface-container border border-black">
+      <div id="sb-score-bar" class="h-full bg-status-success transition-all duration-700" style="width:0%"></div>
+    </div>
+    <p id="sb-status-text" class="text-[10px] mt-3 font-medium text-secondary italic">Awaiting protocol execution.</p>
+  </section>
+
+  <!-- Score History -->
+  <section class="p-6">
+    <div class="flex justify-between items-center mb-4">
+      <span class="text-[10px] font-black uppercase tracking-widest">Score History</span>
+      <div id="sb-trend" class="flex items-center text-outline text-[10px] font-bold">—</div>
+    </div>
+    <div id="sb-history-grid" class="grid grid-cols-5 gap-2">
+      <!-- filled by JS -->
+    </div>
+  </section>
+
+</aside>
+
+<!-- ── MAIN CONTENT ───────────────────────────────────────────────────── -->
+<main class="flex-1 overflow-y-auto bg-surface-container p-6 lg:p-10 space-y-8">
+
+  <!-- Hero -->
+  <section class="border-2 border-black bg-white p-8 relative overflow-hidden">
+    <div class="absolute top-0 right-0 p-4 opacity-5 pointer-events-none">
+      <span class="material-symbols-outlined text-[120px]">policy</span>
+    </div>
+    <div class="max-w-3xl relative z-10">
+      <h2 class="text-4xl lg:text-5xl font-black tracking-tighter uppercase leading-none mb-6">
+        Can an AI read<br/>the fine print?
+      </h2>
+      <p class="text-base text-secondary leading-relaxed mb-8 border-l-4 border-black pl-6">
+        Every food package sold in the US must carry a Nutrition Facts label that follows 40+ exact FDA rules — specific rounding increments, ingredient ordering by finished weight, calorie math from Atwater factors, minimum type sizes based on package area. Getting any of it wrong is a federal violation.<br/><br/>
+        This protocol injects deliberate errors into a draft label, then deploys an AI agent to find and fix every mistake — without being told which fields are wrong. The agent revises up to 10 times to reach 90% compliance.
+      </p>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <div class="border border-black p-4 bg-surface-container-lowest">
+          <div class="text-[10px] font-black text-outline uppercase mb-1">Scoring Categories</div>
+          <div class="text-2xl font-black">7 GROUPS</div>
+          <div class="text-[10px] text-secondary mt-1">nutrients · %DVs · serving · ingredients · type size · health claims · calorie math</div>
+        </div>
+        <div class="border border-black p-4 bg-surface-container-lowest">
+          <div class="text-[10px] font-black text-outline uppercase mb-1">Difficulty Levels</div>
+          <div class="text-2xl font-black">3 TIERS</div>
+          <div class="text-[10px] text-secondary mt-1">easy: 3 errors · medium: 5 + ambiguous RACC · hard: 7 + 3-way category ambiguity</div>
+        </div>
+        <div class="border border-black p-4 bg-surface-container-lowest">
+          <div class="text-[10px] font-black text-outline uppercase mb-1">Pass Threshold</div>
+          <div class="text-2xl font-black">90%</div>
+          <div class="text-[10px] text-secondary mt-1">FDA-acceptable compliance · agent auto-stops when reached</div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Controls -->
+  <section class="flex flex-col md:flex-row justify-between items-center gap-6 bg-black p-6 text-white">
+    <div class="flex items-center gap-6">
+      <span class="text-xs font-black tracking-widest uppercase">Select Protocol Severity:</span>
+      <div id="difficulty-group" class="flex border border-white">
+        <button onclick="setDifficulty('easy')"   class="diff-btn px-6 py-2 text-xs font-bold bg-white text-black" data-d="easy">EASY</button>
+        <button onclick="setDifficulty('medium')" class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="medium">MEDIUM</button>
+        <button onclick="setDifficulty('hard')"   class="diff-btn px-6 py-2 text-xs font-bold hover:bg-white hover:text-black transition-colors" data-d="hard">HARD</button>
+      </div>
+    </div>
+    <div class="flex flex-col items-end gap-1">
+      <button id="run-btn" onclick="runProtocol()"
+        class="bg-status-success text-black px-10 py-4 font-black uppercase tracking-tighter text-sm flex items-center gap-2">
+        <span id="run-btn-text">RUN BASELINE PROTOCOL</span>
+        <span id="run-btn-icon" class="material-symbols-outlined">arrow_forward</span>
+      </button>
+      <span class="text-[10px] text-neutral-400">Runs GPT-4o-mini · ~20–40 seconds</span>
+    </div>
+  </section>
+
+  <!-- Inline progress panel (hidden until running) -->
+  <section id="run-progress" class="hidden bg-black text-white border-t-2 border-white/10 px-6 py-4">
+    <div class="flex items-center gap-4 mb-3">
+      <span class="material-symbols-outlined text-lg running-pulse">sync</span>
+      <span id="loading-task-label" class="font-headline font-black tracking-tighter uppercase text-sm">—</span>
+      <span class="text-[10px] font-mono text-neutral-400 ml-auto">RUNNING…</span>
+    </div>
+    <div class="w-full h-1 bg-white/10 relative overflow-hidden mb-3">
+      <div class="bar-indeterminate"></div>
+    </div>
+    <div id="loading-log" class="font-mono text-[10px] text-neutral-500 space-y-[2px]">
+      <div>→ Initializing episode generator…</div>
+    </div>
+  </section>
+
+  <!-- Label Comparison -->
+  <section class="grid grid-cols-1 xl:grid-cols-2 gap-8">
+
+    <!-- Draft -->
+    <div class="space-y-4">
+      <div class="flex items-center gap-2 text-status-warning font-black uppercase tracking-widest text-sm">
+        <span class="material-symbols-outlined">warning</span> DRAFT INPUT (UNVERIFIED)
+      </div>
+      <div id="draft-label-wrap" class="bg-white border-2 border-black p-4 max-w-[420px] mx-auto">
+        <div class="text-center text-[10px] text-outline py-8">Run a protocol to load draft label.</div>
+      </div>
+    </div>
+
+    <!-- Corrected -->
+    <div class="space-y-4">
+      <div class="flex items-center gap-2 text-status-success font-black uppercase tracking-widest text-sm">
+        <span class="material-symbols-outlined">check_circle</span> AGENT CORRECTED OUTPUT
+      </div>
+      <div class="relative max-w-[420px] mx-auto">
+        <div id="corrected-overlay" class="absolute inset-0 bg-white/60 backdrop-blur-sm z-20 flex flex-col items-center justify-center border-2 border-dashed border-black/20">
+          <span class="material-symbols-outlined text-4xl mb-2 text-outline">visibility_off</span>
+          <span class="text-[10px] font-black uppercase tracking-widest text-outline">Protocol Not Yet Executed</span>
+        </div>
+        <div id="corrected-label-wrap" class="bg-white border-2 border-black p-4">
+          <div class="text-center text-[10px] text-outline py-8">Awaiting agent output.</div>
+        </div>
+      </div>
+    </div>
+
+  </section>
+
+  <!-- Grader Breakdown -->
+  <section class="bg-white border-2 border-black p-8">
+    <h3 class="text-xl font-black uppercase tracking-tight mb-8 border-b-2 border-black pb-2">
+      Grader Breakdown: Metric Compliance
+    </h3>
+    <div id="grader-breakdown" class="space-y-5">
+      <!-- filled by JS -->
+      <div class="text-[10px] text-outline">Execute a protocol run to view compliance breakdown.</div>
+    </div>
+  </section>
+
+  <!-- Run History -->
+  <section class="bg-white border-2 border-black overflow-hidden">
+    <div class="p-4 bg-inverse-surface text-inverse-on-surface text-sm font-black uppercase tracking-widest flex items-center justify-between">
+      RUN HISTORY
+      <span class="text-[10px] font-mono opacity-60">SESSION LOG</span>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="w-full text-left border-collapse">
+        <thead>
+          <tr class="bg-surface-container-high border-b border-black">
+            <th class="p-4 text-[10px] font-black uppercase border-r border-black">#</th>
+            <th class="p-4 text-[10px] font-black uppercase border-r border-black">Difficulty</th>
+            <th class="p-4 text-[10px] font-black uppercase border-r border-black">Product</th>
+            <th class="p-4 text-[10px] font-black uppercase border-r border-black">Score</th>
+            <th class="p-4 text-[10px] font-black uppercase border-r border-black">Steps</th>
+            <th class="p-4 text-[10px] font-black uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody id="history-tbody" class="text-xs font-medium">
+          <tr><td colspan="6" class="p-4 text-[10px] text-outline text-center">No runs this session.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+</main>
+</div>
+
+<!-- Mobile Bottom Nav -->
+<nav class="md:hidden bg-white font-body text-[10px] font-extrabold uppercase tracking-widest fixed bottom-0 w-full z-50 border-t-2 border-black flex justify-around items-center h-20">
+  <div class="flex flex-col items-center justify-center bg-black text-white p-2 flex-1">
+    <span class="material-symbols-outlined mb-1">dashboard</span>DASHBOARD
+  </div>
+  <div class="flex flex-col items-center p-2 flex-1"><span class="material-symbols-outlined mb-1">fact_check</span>VALIDATION</div>
+  <div class="flex flex-col items-center p-2 flex-1"><span class="material-symbols-outlined mb-1">timeline</span>HISTORY</div>
+  <div class="flex flex-col items-center p-2 flex-1"><span class="material-symbols-outlined mb-1">settings</span>SETTINGS</div>
+</nav>
+
+<!-- ── JAVASCRIPT ─────────────────────────────────────────────────────── -->
+<script>
+const BASE_URL = "";
+
+const TASK_CONFIG = {
+  easy:   { task_id: "task_easy"   },
+  medium: { task_id: "task_medium" },
+  hard:   { task_id: "task_hard"   },
+};
+
+const GRADER_GROUPS = [
+  { key: "nutrients",               label: "Nutrient Values (30 fields)",    weight: 0.30 },
+  { key: "percent_dvs",             label: "% Daily Values",                 weight: 0.20 },
+  { key: "ingredient_list",         label: "Ingredient Order (by weight)",   weight: 0.15 },
+  { key: "serving_size_g",          label: "Serving Size (RACC)",            weight: 0.10 },
+  { key: "declared_type_size_inch", label: "Type Size (CFR §101.9d)",        weight: 0.10 },
+  { key: "health_claims",           label: "Health Claims",                  weight: 0.10 },
+  { key: "atwater_consistency",     label: "Atwater Calorie Consistency",    weight: 0.05 },
+];
+
+// Nutrient rows: key, label, unit, indent level (0=top, 1=sub, 2=sub-sub), bold
+const NUTRIENT_ROWS = [
+  { key:"total_fat_g",          label:"Total Fat",         unit:"g",   lvl:0, bold:true  },
+  { key:"saturated_fat_g",      label:"Saturated Fat",     unit:"g",   lvl:1, bold:false },
+  { key:"trans_fat_g",          label:"Trans Fat",         unit:"g",   lvl:1, bold:false, italic:true },
+  { key:"cholesterol_mg",       label:"Cholesterol",       unit:"mg",  lvl:0, bold:true  },
+  { key:"sodium_mg",            label:"Sodium",            unit:"mg",  lvl:0, bold:true  },
+  { key:"total_carbohydrate_g", label:"Total Carbohydrate",unit:"g",   lvl:0, bold:true  },
+  { key:"dietary_fiber_g",      label:"Dietary Fiber",     unit:"g",   lvl:1, bold:false },
+  { key:"total_sugars_g",       label:"Total Sugars",      unit:"g",   lvl:1, bold:false },
+  { key:"added_sugars_g",       label:"Added Sugars",      unit:"g",   lvl:2, bold:false },
+  { key:"protein_g",            label:"Protein",           unit:"g",   lvl:0, bold:true  },
+];
+const MICRO_ROWS = [
+  { key:"vitamin_d_mcg", label:"Vitamin D", unit:"mcg" },
+  { key:"calcium_mg",    label:"Calcium",   unit:"mg"  },
+  { key:"iron_mg",       label:"Iron",      unit:"mg"  },
+  { key:"potassium_mg",  label:"Potassium", unit:"mg"  },
+];
+
+// DV key map (nutrient key → percent_dvs key)
+const DV_KEY_MAP = {
+  total_fat_g:"total_fat_g", saturated_fat_g:"saturated_fat_g",
+  trans_fat_g:"trans_fat_g", cholesterol_mg:"cholesterol_mg",
+  sodium_mg:"sodium_mg", total_carbohydrate_g:"total_carbohydrate_g",
+  dietary_fiber_g:"dietary_fiber_g", total_sugars_g:"total_sugars_g",
+  added_sugars_g:"added_sugars_g", protein_g:"protein_g",
+  vitamin_d_mcg:"vitamin_d_mcg", calcium_mg:"calcium_mg",
+  iron_mg:"iron_mg", potassium_mg:"potassium_mg",
+};
+
+let selectedDifficulty = "easy";
+let sessionHistory = [];
+
+// ── Difficulty toggle ──────────────────────────────────────────────────
+function setDifficulty(d) {
+  selectedDifficulty = d;
+  document.querySelectorAll(".diff-btn").forEach(btn => {
+    const active = btn.dataset.d === d;
+    btn.classList.toggle("bg-white",   active);
+    btn.classList.toggle("text-black", active);
+    btn.classList.toggle("hover:bg-white", !active);
+    btn.classList.toggle("hover:text-black", !active);
+  });
+}
+
+// ── Loading overlay helpers ────────────────────────────────────────────
+const LOG_MESSAGES = [
+  "→ Sampling episode from seed pool…",
+  "→ Injecting regulatory errors…",
+  "→ Dispatching to LLM agent…",
+  "→ Parsing agent correction…",
+  "→ Running FDA grader…",
+  "→ Evaluating serving size (RACC)…",
+  "→ Checking Atwater calorie consistency…",
+  "→ Verifying ingredient order…",
+  "→ Scoring % Daily Values…",
+  "→ Computing final compliance score…",
+];
+
+let _loadingTimer = null;
+let _loadingStep  = 0;
+
+function showLoader(difficulty) {
+  const cfg = TASK_CONFIG[difficulty];
+  document.getElementById("loading-task-label").textContent =
+    cfg.task_id.replace("_", " ").toUpperCase();
+  const log = document.getElementById("loading-log");
+  log.innerHTML = "<div>→ Initializing episode generator…</div>";
+  document.getElementById("run-progress").classList.remove("hidden");
+
+  _loadingStep = 0;
+  _loadingTimer = setInterval(() => {
+    if (_loadingStep >= LOG_MESSAGES.length) { clearInterval(_loadingTimer); return; }
+    const div = document.createElement("div");
+    div.textContent = LOG_MESSAGES[_loadingStep];
+    log.appendChild(div);
+    log.scrollTop = log.scrollHeight;
+    _loadingStep++;
+  }, 2200);
+}
+
+function hideLoader() {
+  clearInterval(_loadingTimer);
+  document.getElementById("run-progress").classList.add("hidden");
+}
+
+// ── Run protocol ───────────────────────────────────────────────────────
+async function runProtocol() {
+  const btn  = document.getElementById("run-btn");
+  const txt  = document.getElementById("run-btn-text");
+  const icon = document.getElementById("run-btn-icon");
+
+  btn.disabled = true;
+  btn.classList.add("opacity-60");
+  txt.textContent = "RUNNING...";
+  txt.classList.add("running-pulse");
+  icon.textContent = "hourglass_empty";
+
+  // Reset corrected panel overlay
+  document.getElementById("corrected-overlay").style.display = "flex";
+
+  showLoader(selectedDifficulty);
+
+  try {
+    const cfg = TASK_CONFIG[selectedDifficulty];
+    const resp = await fetch(`${BASE_URL}/baseline/run`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ task_id: cfg.task_id }),
+    });
+    if (!resp.ok) throw new Error(`Server error: ${resp.status}`);
+    const data = await resp.json();
+    hideLoader();
+    updateUI(data);
+  } catch (err) {
+    hideLoader();
+    alert(`Protocol failed: ${err.message}`);
+  } finally {
+    btn.disabled = false;
+    btn.classList.remove("opacity-60");
+    txt.textContent = "RUN BASELINE PROTOCOL";
+    txt.classList.remove("running-pulse");
+    icon.textContent = "arrow_forward";
+  }
+}
+
+// ── Update all UI from API response ───────────────────────────────────
+function updateUI(data) {
+  const { grader_score, steps_taken, rewards, draft_label,
+          corrected_label, episode_context } = data;
+
+  const scorePct = Math.round(grader_score * 100);
+  const maxSteps = 10;
+
+  // Sidebar
+  const desc = (episode_context.food_category_description || "").toUpperCase();
+  document.getElementById("sb-entity").textContent = desc || "UNKNOWN PRODUCT";
+  document.getElementById("sb-difficulty-badge").textContent = selectedDifficulty.toUpperCase();
+  document.getElementById("sb-form-badge").textContent =
+    (episode_context.physical_form || "bulk").replace("_", " ").toUpperCase();
+  document.getElementById("sb-step-label").textContent = `${steps_taken} / ${maxSteps} steps`;
+  document.getElementById("sb-step-bar").style.width = `${(steps_taken / maxSteps) * 100}%`;
+  document.getElementById("sb-score-num").textContent = scorePct;
+  document.getElementById("sb-score-bar").style.width = `${scorePct}%`;
+  document.getElementById("sb-score-bar").className =
+    `h-full transition-all duration-700 ${scorePct >= 90 ? "bg-status-success" : scorePct >= 70 ? "bg-status-warning" : "bg-error"}`;
+  document.getElementById("sb-status-text").textContent =
+    scorePct >= 90 ? "Status: Compliant with CFR Title 21 §101.9"
+                   : `Status: Non-compliant — ${scorePct}% (threshold: 90%)`;
+
+  // Session history
+  sessionHistory.push({ difficulty: selectedDifficulty, score: scorePct,
+    product: desc, steps: steps_taken, ts: new Date() });
+  renderScoreHistoryGrid();
+
+  // Un-blur corrected panel first (before label render so it's never mid-crash)
+  document.getElementById("corrected-overlay").style.display = "none";
+
+  // Labels
+  const totalPkg  = episode_context.total_package_weight_g || 0;
+  const servingG  = draft_label.serving_size_g || 0;
+  const servings  = totalPkg > 0 ? Math.round(totalPkg / servingG) : 1;
+  renderLabel("draft-label-wrap",     draft_label,     corrected_label, episode_context, servings, false);
+  renderLabel("corrected-label-wrap", corrected_label, corrected_label, episode_context, servings, true);
+
+  // Grader breakdown
+  renderGraderBreakdown(draft_label, corrected_label, scorePct);
+
+  // History table
+  addHistoryRow(data, scorePct, desc);
+}
+
+// ── Render a Nutrition Facts label ────────────────────────────────────
+function renderLabel(wrapId, label, corrected, ctx, servings, isCorrection) {
+  const wrap = document.getElementById(wrapId);
+  const nutrients  = label.nutrients   || {};
+  const pct_dvs    = label.percent_dvs || {};
+  const corNuts    = corrected.nutrients   || {};
+  const corDvs     = corrected.percent_dvs || {};
+  const servingG   = label.serving_size_g || 0;
+  const corServing = corrected.serving_size_g || 0;
+
+  const diffClass = (val, ref) => {
+    if (val === null && ref === null) return "";
+    if (String(val) !== String(ref)) return isCorrection ? "label-row-ok" : "label-row-error";
+    return "";
+  };
+
+  let html = `
+    <h3 class="font-serif text-4xl font-black leading-tight border-b-2 border-black pb-1">Nutrition Facts</h3>
+    <div class="text-sm font-bold border-b border-black py-1">
+      ${servings <= 1 ? "1 serving per container" : `${servings} servings per container`}
+    </div>
+    <div class="flex justify-between items-baseline font-bold py-1 border-b-[8px] border-black ${diffClass(servingG, corServing)}">
+      <span class="text-base">Serving size</span>
+      <span class="text-base">${servingG}g</span>
+    </div>
+    <div class="flex justify-between items-baseline font-black border-b-[8px] border-black py-1 mb-1 ${diffClass(nutrients.energy_kcal, corNuts.energy_kcal)}">
+      <div class="flex flex-col">
+        <span class="text-[10px]">Amount per serving</span>
+        <span class="text-3xl">Calories</span>
+      </div>
+      <span class="text-5xl">${nutrients.energy_kcal ?? "—"}</span>
+    </div>
+    <div class="text-right text-[10px] font-black border-b border-black py-1">% Daily Value*</div>`;
+
+  // Main nutrient rows
+  for (const row of NUTRIENT_ROWS) {
+    const val = nutrients[row.key];
+    const dv  = pct_dvs[DV_KEY_MAP[row.key]];
+    const cval = corNuts[row.key];
+    const cdv  = corDvs[DV_KEY_MAP[row.key]];
+    const cls = diffClass(val, cval) || diffClass(dv, cdv) ? (isCorrection ? "label-row-ok" : "label-row-error") : "";
+    const pl  = row.lvl === 1 ? "pl-4" : row.lvl === 2 ? "pl-8" : "";
+    const dvHtml = dv !== null && dv !== undefined ? `<span class="font-black text-[11px]">${dv}%</span>` : "";
+    const nameHtml = row.italic
+      ? `<i>${row.label}</i> ${fmtVal(val, row.unit)}`
+      : `${row.bold ? `<span class="font-black">${row.label}</span>` : row.label} ${fmtVal(val, row.unit)}`;
+
+    html += `<div class="flex justify-between border-b border-black py-[3px] ${pl} ${cls}">
+      <span class="text-[11px]">${nameHtml}</span>
+      ${dvHtml}
+    </div>`;
+  }
+
+  // Thick rule before micros
+  html += `<div class="border-b-[8px] border-black"></div>`;
+
+  for (const row of MICRO_ROWS) {
+    const val  = nutrients[row.key];
+    const dv   = pct_dvs[DV_KEY_MAP[row.key]];
+    const cval = corNuts[row.key];
+    const cdv  = corDvs[DV_KEY_MAP[row.key]];
+    const cls  = (diffClass(val, cval) || diffClass(dv, cdv)) ? (isCorrection ? "label-row-ok" : "label-row-error") : "";
+    html += `<div class="flex justify-between border-b border-black py-[3px] ${cls}">
+      <span class="text-[11px]">${row.label} ${fmtVal(val, row.unit)}</span>
+      <span class="text-[11px]">${dv !== null && dv !== undefined ? dv + "%" : "—"}</span>
+    </div>`;
+  }
+
+  // Footnote
+  html += `<div class="text-[9px] leading-tight py-3 border-t border-black text-secondary">
+    * The % Daily Value (DV) tells you how much a nutrient in a serving of food contributes to a daily diet. 2,000 calories a day is used for general nutrition advice.
+  </div>`;
+
+  // Ingredients
+  const ings = label.ingredient_list || [];
+  const corIngs = corrected.ingredient_list || [];
+  const ingCls  = JSON.stringify(ings) !== JSON.stringify(corIngs)
+    ? (isCorrection ? "label-row-ok" : "label-row-error") : "";
+  if (ings.length) {
+    html += `<div class="border-t-2 border-black pt-3 mt-1 ${ingCls}">
+      <span class="text-[9px] font-black uppercase">Ingredients: </span>
+      <span class="text-[9px]">${ings.map(i => i.replace(/_/g," ")).join(", ")}.</span>
+    </div>`;
+  }
+
+  wrap.innerHTML = html;
+}
+
+function fmtVal(val, unit) {
+  if (val === null || val === undefined) return "—";
+  const display = typeof val === "number" ? +val.toPrecision(6) : val;
+  return `${display}${unit}`;
+}
+
+// ── Grader breakdown ──────────────────────────────────────────────────
+function renderGraderBreakdown(draft, corrected, scorePct) {
+  const container = document.getElementById("grader-breakdown");
+
+  // Infer per-group pass/fail by comparing draft vs corrected
+  function groupPassed(key) {
+    if (key === "serving_size_g")
+      return String(draft.serving_size_g) === String(corrected.serving_size_g);
+    if (key === "nutrients")
+      return JSON.stringify(draft.nutrients) === JSON.stringify(corrected.nutrients);
+    if (key === "percent_dvs")
+      return JSON.stringify(draft.percent_dvs) === JSON.stringify(corrected.percent_dvs);
+    if (key === "ingredient_list")
+      return JSON.stringify(draft.ingredient_list) === JSON.stringify(corrected.ingredient_list);
+    if (key === "declared_type_size_inch")
+      return String(draft.declared_type_size_inch) === String(corrected.declared_type_size_inch);
+    if (key === "health_claims")
+      return JSON.stringify(corrected.health_claims) === "[]";
+    if (key === "atwater_consistency") {
+      const n = corrected.nutrients || {};
+      const raw = 9 * (n.total_fat_g||0) + 4 * (n.total_carbohydrate_g||0) + 4 * (n.protein_g||0);
+      const rounded = raw < 5 ? 0 : raw <= 50 ? Math.floor(raw/5+0.5)*5 : Math.floor(raw/10+0.5)*10;
+      return Math.abs(rounded - (n.energy_kcal||0)) <= 5;
+    }
+    return false;
+  }
+
+  let rows = "";
+  for (const g of GRADER_GROUPS) {
+    const passed = groupPassed(g.key);
+    const barW   = Math.round(g.weight * 100);
+    const barCls = passed ? "bg-primary" : "bg-error";
+    const icon   = passed ? "✓" : "✗";
+    const iconCls = passed ? "text-status-success" : "text-error";
+    rows += `
+      <div class="space-y-1">
+        <div class="flex justify-between items-center text-[10px] font-bold uppercase">
+          <span class="${iconCls} mr-2">${icon}</span>
+          <span class="flex-1">${g.label}</span>
+          <span class="font-mono ml-4">${barW}% weight</span>
+        </div>
+        <div class="h-2 w-full bg-surface-container border border-black">
+          <div class="h-full ${barCls}" style="width:${barW}%"></div>
+        </div>
+      </div>`;
+  }
+  rows += `<div class="border-t-2 border-black pt-4 flex justify-between items-baseline">
+    <span class="font-black text-sm uppercase tracking-wider">Total Compliance Score</span>
+    <span class="text-3xl font-black ${scorePct >= 90 ? "text-status-success" : scorePct >= 70 ? "text-status-warning" : "text-error"}">${scorePct}%</span>
+  </div>`;
+
+  container.innerHTML = rows;
+}
+
+// ── Score history grid ────────────────────────────────────────────────
+function renderScoreHistoryGrid() {
+  const grid = document.getElementById("sb-history-grid");
+  const last10 = sessionHistory.slice(-10);
+  // pad to 10
+  const cells = Array(10).fill(null).map((_, i) => last10[i] || null);
+  grid.innerHTML = cells.map(h => {
+    if (!h) return `<div class="aspect-square bg-surface-dim border border-outline-variant"></div>`;
+    const op = Math.round((h.score / 100) * 100);
+    const bg = h.score >= 90 ? "bg-status-success" : h.score >= 70 ? "bg-status-warning" : "bg-error";
+    return `<div class="aspect-square ${bg} opacity-${Math.min(100, Math.max(40, op))} border border-black/20 cursor-pointer" title="${h.difficulty.toUpperCase()} · ${h.score}%"></div>`;
+  }).join("");
+
+  // Trend
+  const trendEl = document.getElementById("sb-trend");
+  if (sessionHistory.length >= 2) {
+    const delta = sessionHistory.at(-1).score - sessionHistory[0].score;
+    const sign = delta >= 0 ? "+" : "";
+    const cls  = delta >= 0 ? "text-status-success" : "text-error";
+    trendEl.innerHTML = `<span class="material-symbols-outlined text-sm">${delta >= 0 ? "trending_up" : "trending_down"}</span><span class="ml-1 ${cls}">${sign}${delta}%</span>`;
+  } else {
+    trendEl.innerHTML = `<span class="text-outline">—</span>`;
+  }
+}
+
+// ── History table ─────────────────────────────────────────────────────
+function addHistoryRow(data, scorePct, desc) {
+  const tbody = document.getElementById("history-tbody");
+  const n = sessionHistory.length;
+  const passed = scorePct >= 90;
+  const ts = new Date().toLocaleTimeString();
+
+  // Remove placeholder row if present
+  if (tbody.querySelector("td[colspan]")) tbody.innerHTML = "";
+
+  const tr = document.createElement("tr");
+  tr.className = "border-b border-black hover:bg-surface-container-low transition-colors";
+  tr.innerHTML = `
+    <td class="p-4 border-r border-black font-mono">#${String(n).padStart(3,"0")}</td>
+    <td class="p-4 border-r border-black font-bold uppercase">${selectedDifficulty}</td>
+    <td class="p-4 border-r border-black max-w-[180px] truncate text-[11px]">${desc || "—"}</td>
+    <td class="p-4 border-r border-black font-mono font-bold ${scorePct >= 90 ? "text-status-success" : scorePct >= 70 ? "text-status-warning" : "text-error"}">${scorePct}%</td>
+    <td class="p-4 border-r border-black font-mono">${data.steps_taken}/10</td>
+    <td class="p-4">
+      <span class="${passed ? "bg-status-success/20 text-status-success" : "bg-error/20 text-error"} px-2 py-1 font-black text-[10px]">
+        ${passed ? "VALIDATED" : "REJECTED"}
+      </span>
+    </td>`;
+  tbody.insertBefore(tr, tbody.firstChild);
+}
+
+// Init
+setDifficulty("easy");
+</script>
+</body>
+</html>

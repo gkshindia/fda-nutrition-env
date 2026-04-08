@@ -1,3 +1,13 @@
+---
+title: FDA Nutrition Facts Panel Environment
+emoji: 🥗
+colorFrom: green
+colorTo: blue
+sdk: docker
+pinned: false
+app_port: 7860
+---
+
 # FDA Nutrition Facts Panel — OpenEnv Environment
 
 ## What is this?

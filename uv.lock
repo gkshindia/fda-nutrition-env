@@ -564,6 +564,7 @@ dependencies = [
     { name = "numpy" },
     { name = "openai" },
     { name = "openenv-core", extra = ["core"] },
+    { name = "python-dotenv" },
 ]
 
 [package.dev-dependencies]
@@ -576,6 +577,7 @@ requires-dist = [
     { name = "numpy", specifier = ">=2.4.4" },
     { name = "openai", specifier = ">=1.0.0" },
     { name = "openenv-core", extras = ["core"], specifier = ">=0.2.2" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
 ]
 provides-extras = ["dev"]
 
