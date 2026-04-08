@@ -1,3 +1,4 @@
 spec_version: 1
+name: fda-nutrition-env
 port: 7860
 app: env.server.app:app
