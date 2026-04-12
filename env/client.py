@@ -8,8 +8,11 @@ class FDAEnv(EnvClient[FDAAction, FDAObservation, FDAState]):
         return action.model_dump()
 
     def _parse_result(self, payload):
-        obs = FDAObservation(**payload) if payload else FDAObservation()
-        return StepResult(observation=obs, reward=obs.reward, done=obs.done)
+        obs_data = payload.get("observation", payload) if payload else {}
+        reward = payload.get("reward")
+        done = payload.get("done", False)
+        obs = FDAObservation(**obs_data) if obs_data else FDAObservation()
+        return StepResult(observation=obs, reward=reward if reward is not None else obs.reward, done=done or obs.done)
 
     def _parse_state(self, payload):
         return FDAState(**payload) if payload else FDAState()
