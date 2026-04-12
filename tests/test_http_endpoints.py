@@ -32,3 +32,45 @@ def test_http_reset_step_state_persistence():
     state_after_step_payload = state_after_step.json()
     assert state_after_step_payload["episode_id"] == reset_episode_id
     assert state_after_step_payload["step_count"] == 1
+
+
+def test_http_rejects_invalid_task_ids():
+    app_module._http_env = FDAEnvironment()
+    client = TestClient(app_module.app)
+
+    reset_resp = client.post("/reset", json={"task_id": "does_not_exist", "seed": 42})
+    assert reset_resp.status_code == 404
+    assert "Unknown task_id" in reset_resp.json()["detail"]
+
+    grader_resp = client.post(
+        "/grader",
+        json={"task_id": "does_not_exist", "seed": 42, "actions": []},
+    )
+    assert grader_resp.status_code == 404
+    assert "Unknown task_id" in grader_resp.json()["detail"]
+
+    baseline_resp = client.post(
+        "/baseline/run",
+        json={"task_id": "does_not_exist", "seed": 42},
+    )
+    assert baseline_resp.status_code == 404
+    assert "Unknown task_id" in baseline_resp.json()["detail"]
+
+
+def test_openapi_reset_request_includes_task_id():
+    client = TestClient(app_module.app)
+    spec = client.get("/openapi.json")
+    assert spec.status_code == 200
+
+    reset_schema = spec.json()["components"]["schemas"]["ResetRequest"]
+    assert "task_id" in reset_schema["properties"]
+
+
+def test_mcp_route_not_exposed():
+    client = TestClient(app_module.app)
+
+    openapi = client.get("/openapi.json").json()
+    assert "/mcp" not in openapi["paths"]
+
+    mcp_resp = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"})
+    assert mcp_resp.status_code == 404

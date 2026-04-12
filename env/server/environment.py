@@ -72,6 +72,15 @@ TASKS = {
 }
 
 
+def validate_task_id(task_id: str) -> dict:
+    """Return the task config for a valid task id or raise a clear error."""
+    task = TASKS.get(task_id)
+    if task is None:
+        valid = ", ".join(sorted(TASKS))
+        raise ValueError(f"Unknown task_id {task_id!r}. Valid task_ids: {valid}")
+    return task
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # PROMPT BUILDER
 # ─────────────────────────────────────────────────────────────────────────────
@@ -127,7 +136,7 @@ def _build_feedback_text(
     """
     Build human-readable feedback from grader result.
 
-    Reveals which groups and fields are wrong, but NOT the expected values.
+    Reveals which groups and fields are wrong without leaking hidden answers.
     """
     score = grader_result["score"]
     group_scores = grader_result["group_scores"]
@@ -148,7 +157,27 @@ def _build_feedback_text(
             status = "NEEDS FIX"
         lines.append(f"  {group_name}: {group_score:.2f} — {status}")
 
-    # Collect incorrect fields with submitted vs expected values
+    def summarize_issue(field_name: str, detail: dict) -> str:
+        if field_name == "declared_type_size_inch":
+            minimum = detail.get("expected_min")
+            if minimum is not None:
+                return f"submitted {detail.get('agent')}; must be at least {minimum}"
+            return f"submitted {detail.get('agent')}; declared type size is invalid"
+
+        if field_name == "atwater_consistency":
+            if detail.get("expected_kcal") is not None:
+                return (
+                    f"declared calories {detail.get('agent_kcal')} are inconsistent "
+                    "with fat/carbohydrate/protein values"
+                )
+            return "missing fat, carbohydrate, protein, or calories needed for Atwater check"
+
+        agent_val = detail.get("agent")
+        if field_name == "ingredient_list":
+            return f"submitted {agent_val}; ingredient order is incorrect"
+        return f"submitted {agent_val}; value is incorrect"
+
+    # Collect incorrect fields without leaking exact expected values.
     incorrect_fields = {
         field_name: detail
         for field_name, detail in field_details.items()
@@ -159,9 +188,7 @@ def _build_feedback_text(
         lines.append("")
         lines.append("Incorrect fields:")
         for field_name, detail in incorrect_fields.items():
-            agent_val = detail.get("agent")
-            expected_val = detail.get("expected")
-            lines.append(f"  - {field_name}: submitted {agent_val}, expected {expected_val}")
+            lines.append(f"  - {field_name}: {summarize_issue(field_name, detail)}")
     else:
         lines.append("")
         lines.append("All fields correct! Set final_submission=true to lock in your score.")
@@ -186,7 +213,7 @@ class FDAEnvironment(Environment):
         task_id: str = "task_easy",
         **kwargs: Any,
     ) -> FDAObservation:
-        task = TASKS.get(task_id, TASKS["task_easy"])
+        task = validate_task_id(task_id)
         difficulty = task["difficulty"]
 
         episode = generate_episode(difficulty, seed=seed)

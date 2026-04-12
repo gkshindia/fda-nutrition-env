@@ -48,6 +48,8 @@ def test_step_non_final_returns_feedback(env):
     assert result.reward is not None
     assert "Group scores" in result.text
     assert "Incorrect fields" in result.text or "All fields correct" in result.text
+    assert "expected None" not in result.text
+    assert "must be at least" in result.text
 
 
 # ── Test 3: perfect score ─────────────────────────────────────────────────────
@@ -108,6 +110,12 @@ def test_seed_reproducibility():
     env1.step(FDAAction(label=obs1.draft_label, final_submission=True))
     env2.step(FDAAction(label=obs2.draft_label, final_submission=True))
     assert env1.grader_score == env2.grader_score
+
+
+def test_invalid_task_id_raises():
+    env = FDAEnvironment()
+    with pytest.raises(ValueError, match="Unknown task_id"):
+        env.reset(task_id="does_not_exist", seed=42)
 
 
 # ── Test 8: multi-step improves score ────────────────────────────────────────

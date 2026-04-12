@@ -139,11 +139,15 @@ The FDA rule says: compute calories from the *unrounded* scaled nutrient values,
 
 | Endpoint | Method | What it does |
 |---|---|---|
+| `/health` | GET | Liveness check for deployments and evaluators. |
+| `/metadata` | GET | Return environment metadata exposed by the OpenEnv server. |
+| `/schema` | GET | Return JSON schemas for action, observation, and state. |
 | `/reset` | POST | Start a new episode. Returns the broken draft label and product context. |
 | `/step` | POST | Submit a corrected label. Returns score, feedback, and done flag. |
 | `/state` | GET | Check current episode status (step count, best score, task). |
 | `/tasks` | GET | List available tasks with descriptions and difficulty levels. |
 | `/grader` | POST | Replay a full episode from seed + actions. Returns final grader score. |
+| `/baseline` | POST | Run the baseline agent across all tasks and return summary scores. |
 | `/baseline/run` | POST | Run the GPT-4o-mini baseline agent on a task. Returns full trajectory. |
 | `/docs` | GET | Auto-generated API documentation (FastAPI/Swagger). |
 
@@ -151,7 +155,7 @@ The FDA rule says: compute calories from the *unrounded* scaled nutrient values,
 
 ## Running it locally
 
-**Requirements**: Python 3.11+, `uv`
+**Requirements**: Python 3.12+, `uv`
 
 ```bash
 # Clone and install

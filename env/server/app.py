@@ -8,9 +8,9 @@ from fastapi.routing import APIRoute
 from pydantic import BaseModel, ValidationError
 from openenv.core.env_server.serialization import deserialize_action, serialize_observation
 from openenv.core.env_server.http_server import create_app
-from openenv.core.env_server.types import ResetRequest, ResetResponse, StepRequest, StepResponse
+from openenv.core.env_server.types import ResetResponse, StepRequest, StepResponse
 from env.models import FDAAction, FDAObservation
-from env.server.environment import FDAEnvironment, TASKS
+from env.server.environment import FDAEnvironment, TASKS, validate_task_id
 
 # ── Logging setup ─────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -31,6 +31,7 @@ _http_env_lock = threading.Lock()
 
 def _replace_stateless_openenv_routes() -> None:
     routes_to_replace = {
+        ("POST", "/mcp"),
         ("POST", "/reset"),
         ("POST", "/step"),
         ("GET", "/state"),
@@ -76,6 +77,12 @@ class GraderRequest(BaseModel):
     actions: list[dict]
 
 
+class ResetRequest(BaseModel):
+    seed: int | None = None
+    episode_id: str | None = None
+    task_id: str = "task_easy"
+
+
 @app.get("/tasks")
 def get_tasks():
     task_list = list(TASKS.values())
@@ -83,8 +90,19 @@ def get_tasks():
     return {"tasks": task_list, "action_schema": FDAAction.model_json_schema()}
 
 
+def _ensure_valid_task(task_id: str) -> None:
+    try:
+        validate_task_id(task_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=str(exc),
+        ) from exc
+
+
 @app.post("/reset", response_model=ResetResponse, tags=["Environment Control"])
 def reset_env(request: ResetRequest = Body(default_factory=ResetRequest)) -> ResetResponse:
+    _ensure_valid_task(request.task_id)
     kwargs = request.model_dump(exclude_unset=True)
     with _http_env_lock:
         observation = _http_env.reset(**kwargs)
@@ -129,6 +147,7 @@ def get_state():
 
 @app.post("/grader")
 def grader(req: GraderRequest):
+    _ensure_valid_task(req.task_id)
     logger.info("GRADER  task=%s seed=%s actions=%d", req.task_id, req.seed, len(req.actions))
     env = FDAEnvironment()
     env.reset(task_id=req.task_id, seed=req.seed)
@@ -161,6 +180,7 @@ class BaselineRunRequest(BaseModel):
 
 @app.post("/baseline/run")
 def run_baseline_task(req: BaselineRunRequest):
+    _ensure_valid_task(req.task_id)
     from baseline import run_baseline_task as _run
     logger.info("BASELINE/RUN  task=%s — starting", req.task_id)
     result = _run(req.task_id, req.seed)
