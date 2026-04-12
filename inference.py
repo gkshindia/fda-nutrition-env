@@ -198,7 +198,12 @@ async def main() -> int:
     openai_client = _create_openai_client()
 
     if IMAGE_NAME:
-        env = await FDAEnv.from_docker_image(IMAGE_NAME)
+        env = await FDAEnv.from_env(
+            "gkshindia/fda-nutrition-env",
+            use_docker=False,
+            project_path="/app",
+            app="env.server.app:app",
+        )
     else:
         env = FDAEnv(base_url=ENV_BASE_URL)
 
