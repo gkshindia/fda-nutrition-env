@@ -142,11 +142,8 @@ def test_openapi_reset_request_includes_task_id():
     assert "task_id" in reset_schema["properties"]
 
 
-def test_mcp_route_not_exposed():
+def test_mcp_route_exposed():
     client = TestClient(app_module.app)
 
-    openapi = client.get("/openapi.json").json()
-    assert "/mcp" not in openapi["paths"]
-
     mcp_resp = client.post("/mcp", json={"jsonrpc": "2.0", "id": 1, "method": "initialize"})
-    assert mcp_resp.status_code == 404
+    assert mcp_resp.status_code == 200

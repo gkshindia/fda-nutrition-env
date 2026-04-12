@@ -31,7 +31,6 @@ _http_env_lock = threading.Lock()
 
 def _replace_stateless_openenv_routes() -> None:
     routes_to_replace = {
-        ("POST", "/mcp"),
         ("POST", "/reset"),
         ("POST", "/step"),
         ("GET", "/state"),
@@ -126,7 +125,13 @@ def step_env(request: StepRequest) -> StepResponse:
                 status_code=status.HTTP_409_CONFLICT,
                 detail="No active episode. Call POST /reset before POST /step.",
             )
-        observation = _http_env.step(action, **kwargs)
+        try:
+            observation = _http_env.step(action, **kwargs)
+        except ValueError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+                detail=str(exc),
+            ) from exc
     return StepResponse(**serialize_observation(observation))
 
 
