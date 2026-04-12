@@ -70,6 +70,7 @@ SEED_PRODUCTS: dict[str, dict] = {
         "calcium_mg": 83.0,
         "iron_mg": 0.71,
         "vitamin_d_mcg": 0.0,
+        "sub_ingredients": ["cane sugar", "molasses"],
     },
     "butter": {
         "fdc_id": 173410,
@@ -175,6 +176,7 @@ SEED_PRODUCTS: dict[str, dict] = {
         "calcium_mg": 73.0,
         "iron_mg": 11.9,
         "vitamin_d_mcg": 0.0,  # not in SR Legacy for this food
+        "sub_ingredients": ["chocolate liquor", "sugar", "cocoa butter", "soy lecithin", "vanilla"],
     },
     "dried_cranberries": {
         "fdc_id": 171723,
@@ -196,6 +198,7 @@ SEED_PRODUCTS: dict[str, dict] = {
         "calcium_mg": 9.0,
         "iron_mg": 0.39,
         "vitamin_d_mcg": 0.0,
+        "sub_ingredients": ["cranberries", "sugar", "sunflower oil"],
     },
     "egg_whole_raw": {
         "fdc_id": 171287,
@@ -280,6 +283,7 @@ SEED_PRODUCTS: dict[str, dict] = {
         "calcium_mg": 6.0,
         "iron_mg": 0.42,
         "vitamin_d_mcg": 0.0,
+        "sub_ingredients": ["honey", "water"],
     },
     "oats": {
         "fdc_id": 173905,
@@ -343,6 +347,7 @@ SEED_PRODUCTS: dict[str, dict] = {
         "calcium_mg": 62.0,
         "iron_mg": 1.79,
         "vitamin_d_mcg": 0.0,
+        "sub_ingredients": ["grapes", "sunflower oil"],
     },
     "salt": {
         "fdc_id": 173468,

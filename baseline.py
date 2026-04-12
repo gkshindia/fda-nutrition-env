@@ -1,7 +1,8 @@
 """
-FDA Nutrition Facts Panel — Baseline Agent
-===========================================
-Submits corrected Nutrition Facts labels using an OpenAI-compatible LLM.
+FDA Nutrition Facts Panel — Baseline Agent (5-Phase Sequential)
+===============================================================
+Submits one action per phase using an OpenAI-compatible LLM.
+All interaction is via HTTP — no local FDAEnvironment.
 
 Required env vars (hackathon):
     API_BASE_URL  — OpenAI-compatible API endpoint (default: https://api.openai.com/v1)
@@ -28,10 +29,6 @@ import sys
 import dotenv
 import httpx
 from openai import OpenAI
-
-from core.grader import grade
-from env.models import FDAAction
-from env.server.environment import FDAEnvironment
 
 logger = logging.getLogger("fda.baseline")
 
@@ -65,135 +62,6 @@ ENVIRONMENT_NAME = "fda-nutrition-env"
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# RACC KEYWORD LOOKUP
-# ─────────────────────────────────────────────────────────────────────────────
-
-def _guess_racc_grams(food_description: str, physical_form: str) -> tuple[float, str]:
-    """
-    Keyword-match food_category_description to the most likely RACC in grams.
-    Returns (racc_g, matched_category_name).
-    Rules ordered by specificity; first match wins.
-    """
-    desc = food_description.lower()
-
-    # Oils and fats (14g) — checked before "butter" to avoid nut butter false match
-    if any(kw in desc for kw in ("cooking oil", "oil blend", "shortening")):
-        return 14.0, "Butter, margarine, oil, shortening"
-
-    # Grain-based bars (40g) — " bar" is a strong, reliable signal
-    if " bar" in desc or desc.startswith("bar ") or "energy bar" in desc or "protein bar" in desc:
-        return 40.0, "Grain-based bars with or without filling or coating"
-
-    # RTE cereal ≥43g/cup (60g) — granola or clusters not already tagged as bar
-    if any(kw in desc for kw in ("granola", "cluster", "whole grain cluster")):
-        return 60.0, "Breakfast cereals, ready-to-eat, weighing 43 g or more per cup"
-
-    # Hot cereal (40g)
-    if any(kw in desc for kw in ("hot cereal", "oatmeal", "porridge")):
-        return 40.0, "Breakfast cereals (hot cereal type), hominy grits"
-
-    # Nut/seed butters (32g) — compound phrases first, then single-word "spread"/"paste"
-    if any(kw in desc for kw in ("peanut butter", "almond butter", "nut butter",
-                                  "walnut spread", "chocolate spread")):
-        return 32.0, "Nut and seed butters, pastes, or creams"
-    if ("spread" in desc or "paste" in desc
-            or ("butter" in desc and "shortbread" not in desc and "cooking" not in desc)):
-        if any(kw in desc for kw in ("nut", "almond", "peanut", "walnut", "chocolate")):
-            return 32.0, "Nut and seed butters, pastes, or creams"
-
-    # Cookies (30g)
-    if any(kw in desc for kw in ("cookie", "shortbread", "biscuit", "bites", "energy bites")):
-        return 30.0, "Cookies"
-
-    # Trail mix / snack mix / nuts-and-seeds (30g)
-    if any(kw in desc for kw in ("trail mix", "snack mix", "snack blend")):
-        return 30.0, "Nuts, seeds and mixtures, all types"
-    if ("nut" in desc or "seed" in desc) and "bar" not in desc and "butter" not in desc:
-        return 30.0, "Nuts, seeds and mixtures, all types"
-
-    # Default: 30g (snacks, candies, cookies)
-    return 30.0, "Snacks / Cookies / Candies (default)"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# FDA REGULATORY CONTEXT (included in the LLM prompt)
-# ─────────────────────────────────────────────────────────────────────────────
-
-FDA_REGULATORY_RULES = """\
-## FDA Nutrition Facts Label — Regulatory Rules
-
-You are correcting a draft Nutrition Facts label. Apply these rules exactly.
-
-### 1. Serving Size
-- Serving size comes from 21 CFR 101.12 RACC (Reference Amounts Customarily Consumed).
-- For bulk products: serving_size_g = RACC.
-- For discrete units: if one unit is 50%-200% of RACC, one unit IS the serving.
-- Check that the label's serving_size_g matches the RACC for the product category.
-
-### 2. Nutrient Scaling
-- Scale each lab nutrient from lab_sample_size_g to serving_size_g:
-    nutrient_per_serving = (lab_nutrient / lab_sample_size_g) * serving_size_g
-
-### 3. Regulatory Rounding (21 CFR 101.9(c))
-Use round-half-UP (NOT Python's round which uses banker's rounding).
-Round-half-up: floor(value / increment + 0.5) * increment
-
-Rounding tiers by nutrient:
-- Calories: <5→0, 5-50→nearest 5, >50→nearest 10
-- Total fat: <0.5→0, 0.5-5→nearest 0.5g, >5→nearest 1g
-- Saturated fat: <0.5→0, 0.5-5→nearest 0.5g, >5→nearest 1g
-- Trans fat: <0.5→0, 0.5-5→nearest 0.5g, >5→nearest 1g
-- Cholesterol: <2→0, 2-5→"less than 5mg", ≥5→nearest 5mg
-- Sodium: <5→0, 5-140→nearest 5mg, >140→nearest 10mg
-- Total carbohydrate: <0.5→0, 0.5-1→"less than 1g", ≥1→nearest 1g
-- Dietary fiber: <0.5→0, 0.5-1→"less than 1g", ≥1→nearest 1g
-- Total sugars: <0.5→0, 0.5-1→"less than 1g", ≥1→nearest 1g
-- Added sugars: <0.5→0, 0.5-1→"less than 1g", ≥1→nearest 1g
-- Protein: <0.5→0, 0.5-1→"less than 1g", ≥1→nearest 1g
-- Vitamin D: <0.1→0, ≥0.1→nearest 0.1mcg (but declare in mcg, round to 0.1)
-- Calcium: <5→0, 5-140→nearest 10mg, >140→nearest 20mg
-- Iron: <0.1→0, ≥0.1→nearest 0.1mg (but >0.5 round to nearest 0.1)
-- Potassium: <5→0, 5-140→nearest 5mg, >140→nearest 10mg
-
-### 4. Atwater Calories (21 CFR 101.9(c)(1)(i))
-- Declared calories = round_calories(9 × fat + 4 × carb + 4 × protein)
-- Use the UNROUNDED (pre-rounding) scaled macros for this calculation, NOT the rounded values.
-- The declared energy_kcal must match the Atwater result, not the USDA energy field.
-
-### 5. %Daily Value (21 CFR 101.9(c)(8))
-- %DV = round_half_up(rounded_declared_value / DRV × 100) to nearest integer
-- Daily Reference Values (2020 update):
-    total_fat: 78g, saturated_fat: 20g, cholesterol: 300mg, sodium: 2300mg,
-    total_carbohydrate: 275g, dietary_fiber: 28g, added_sugars: 50g, protein: 50g,
-    vitamin_d: 20mcg, calcium: 1300mg, iron: 18mg, potassium: 4700mg
-- trans_fat and total_sugars have NO established DV → %DV is null for these.
-
-### 6. Ingredient Order (21 CFR 101.4(a)(1))
-- List ingredients in DESCENDING order by FINISHED weight (after moisture loss).
-- Moisture loss only affects moisture-contributing ingredients.
-- finished_weight = as_added_weight - (as_added_weight / mc_total) × total_moisture_loss
-  where mc_total = sum of moisture-contributing ingredient weights,
-  total_moisture_loss = total_as_added × (moisture_loss_pct / 100)
-- Non-moisture-contributing ingredients keep their as-added weight.
-
-### 7. PDP Area & Type Size (21 CFR 101.9(d))
-- Rectangular: PDP area = height × width
-- Cylindrical: PDP area = height × (π × diameter) / num_display_panels
-- Minimum type size depends on PDP area:
-    ≤5 sq in: 1/16 inch (0.0625)
-    5-25 sq in: 1/8 inch (0.125)
-    25-100 sq in: 3/16 inch (0.1875)
-    >100 sq in: 1/4 inch (0.25)
-- declared_type_size_inch must be ≥ the minimum for the PDP area.
-
-### 8. Health Claims
-- Only include health claims that are substantiated by the product's nutrient values.
-- If a claim references a nutrient that doesn't meet thresholds, remove it.
-- When in doubt, remove the claim (set health_claims to empty list []).
-"""
-
-
-# ─────────────────────────────────────────────────────────────────────────────
 # LLM CLIENT SETUP
 # ─────────────────────────────────────────────────────────────────────────────
 
@@ -201,15 +69,12 @@ def _create_openai_client() -> OpenAI:
     """Create an OpenAI client respecting hackathon env vars."""
     api_base_url_from_env = bool(os.getenv("API_BASE_URL", "").strip())
 
-    # If API_BASE_URL was explicitly provided, prefer HF_TOKEN auth for that endpoint.
-    # Otherwise use the OpenAI default endpoint with OPENAI_API_KEY auth.
     if api_base_url_from_env:
         api_key = HF_TOKEN or OPENAI_API_KEY or "not-needed"
-        logger.info("LLM client → %s  model=%s", API_BASE_URL, MODEL_NAME)
     else:
         api_key = OPENAI_API_KEY or HF_TOKEN or "not-needed"
-        logger.info("LLM client → %s  model=%s", API_BASE_URL, MODEL_NAME)
 
+    logger.info("LLM client → %s  model=%s", API_BASE_URL, MODEL_NAME)
     return OpenAI(api_key=api_key, base_url=API_BASE_URL, timeout=90.0)
 
 
@@ -258,7 +123,6 @@ def _extract_json_from_response(response_text: str) -> dict | None:
     # Attempt 4: find outermost { ... }
     brace_start = response_text.find("{")
     if brace_start != -1:
-        # Find matching closing brace by counting depth
         depth = 0
         for i in range(brace_start, len(response_text)):
             if response_text[i] == "{":
@@ -278,123 +142,212 @@ def _extract_json_from_response(response_text: str) -> dict | None:
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# PROMPT BUILDER
+# PHASE-SPECIFIC SYSTEM PROMPTS
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _precompute_scaled_nutrients(episode_context: dict, serving_g: float) -> dict:
-    """
-    Pre-compute scaled (unrounded) nutrient values per serving.
+PHASE_1_SYSTEM = """\
+You are an FDA regulatory expert classifying food products.
 
-    This removes the scaling math burden from the LLM so it only
-    needs to apply FDA rounding rules.
-    """
-    lab = episode_context.get("lab_nutrients", {})
-    lab_sample = episode_context.get("lab_sample_size_g", 1.0)
-    scale = serving_g / lab_sample
-    return {k: v * scale for k, v in lab.items()}
+Your task: Given a food product description, classify it into the correct FDA category
+from 21 CFR 101.12 Table 2 and determine the RACC (Reference Amount Customarily Consumed).
+
+Key RACC categories and values:
+- Breakfast cereals (hot cereal type), hominy grits: 40g
+- Breakfast cereals, ready-to-eat, weighing 43g or more per cup (granola, clusters): 60g
+- Grain-based bars with or without filling or coating: 40g
+- Nuts, seeds and mixtures, all types: sliced, chopped, slivered, and whole: 30g
+- Nut and seed butters, pastes, or creams: 32g
+- Cookies: 30g
+- Butter, margarine, oil, shortening: 14g
+- Candies: 30g (hard candies 15g)
+
+For household measure:
+- Bulk products: use standard measures like "1/4 cup", "2 tbsp"
+- Discrete units: use unit description like "1 bar", "3 cookies"
+
+Return ONLY a JSON object with keys: food_category, racc_g, household_measure
+No explanation, no markdown wrapping."""
+
+PHASE_2_SYSTEM = """\
+You are an FDA regulatory expert determining label format and serving size.
+
+Decision tree for label format:
+1. Discrete units (bars, cookies, etc.):
+   - If one unit weight is 50-200% of RACC → one unit is the serving (single_column)
+   - If one unit weight is <50% or >200% of RACC → use bulk rules below
+2. Bulk products:
+   - Package weight ≤ 200% RACC → single_serving_container (serving = package weight)
+   - Package weight 200-300% RACC → dual_column (serving = RACC)
+   - Package weight > 300% RACC → single_column (serving = RACC)
+
+Serving declaration format: "{household_measure} ({serving_size_g}g)"
+For discrete units: "1 bar (40g)", for bulk: "1/4 cup (30g)"
+
+Return ONLY a JSON object with keys: label_format, serving_size_g, serving_declaration_text
+No explanation, no markdown wrapping."""
+
+PHASE_3_SYSTEM = """\
+You are an FDA regulatory expert computing nutrient values for a Nutrition Facts label.
+
+Steps:
+1. Scale each lab nutrient to per-serving:
+   nutrient_per_serving = (lab_nutrient / lab_sample_size_g) × serving_size_g
+
+2. Apply FDA rounding (round-half-UP = floor(value/increment + 0.5) * increment):
+   - Calories: <5→0, 5-50→nearest 5, >50→nearest 10
+   - Total fat/saturated fat/trans fat: <0.5→0, 0.5-5→nearest 0.5g, >5→nearest 1g
+   - Cholesterol: <2→0, 2-5→"less than 5mg" (use 0), ≥5→nearest 5mg
+   - Sodium: <5→0, 5-140→nearest 5mg, >140→nearest 10mg
+   - Total carb/dietary fiber/total sugars/added sugars/protein: <0.5→0, 0.5-1→<1g (use 0), ≥1→nearest 1g
+   - Vitamin D: nearest 0.1mcg (use 0 if <0.1)
+   - Calcium: <5→0, 5-140→nearest 10mg, >140→nearest 20mg
+   - Iron: nearest 0.1mg (use 0 if <0.1)
+   - Potassium: <5→0, 5-140→nearest 5mg, >140→nearest 10mg
+
+3. Atwater calories (use UNROUNDED scaled values, NOT rounded):
+   energy_kcal = round_calories(9 × fat_g + 4 × carb_g + 4 × protein_g)
+
+4. %DV = floor(rounded_value / DRV × 100 + 0.5) as integer
+   DRVs: total_fat=78g, saturated_fat=20g, cholesterol=300mg, sodium=2300mg,
+   total_carbohydrate=275g, dietary_fiber=28g, added_sugars=50g, protein=50g,
+   vitamin_d=20mcg, calcium=1300mg, iron=18mg, potassium=4700mg
+   trans_fat and total_sugars → null (no established DV)
+
+Return ONLY a JSON object with keys:
+- nutrients: dict with keys energy_kcal, protein_g, total_fat_g, saturated_fat_g, trans_fat_g,
+  cholesterol_mg, total_carbohydrate_g, dietary_fiber_g, total_sugars_g, added_sugars_g,
+  sodium_mg, potassium_mg, calcium_mg, iron_mg, vitamin_d_mcg
+- percent_dvs: dict with same keys (null for trans_fat_g and total_sugars_g)
+- energy_kcal: the Atwater-computed calorie value
+No explanation, no markdown wrapping."""
+
+PHASE_4_SYSTEM = """\
+You are an FDA regulatory expert determining ingredient order for a food label.
+
+Rules (21 CFR 101.4(a)(1)):
+- List ingredients in DESCENDING order by FINISHED weight (after moisture loss)
+- Moisture loss calculation:
+  1. total_moisture_loss = total_as_added_weight × (moisture_loss_pct / 100)
+  2. Distribute loss proportionally among moisture_contributing ingredients ONLY
+  3. finished_weight_i = as_added_i - (as_added_i / mc_total) × total_moisture_loss
+     where mc_total = sum of all moisture_contributing ingredient weights
+  4. Non-moisture-contributing ingredients keep their as_added weight
+  5. Sort descending by finished weight
+
+- Compound ingredients (>2% of finished weight): list sub-ingredients in parentheses
+- Ingredients ≤2% of finished weight: may be listed in any order with "Contains 2% or less of:"
+
+Return ONLY a JSON object with keys:
+- ingredient_list: ordered list of ingredient names (descending by finished weight)
+- compound_ingredient_sublists: dict mapping compound ingredient names to their sub-ingredient lists
+No explanation, no markdown wrapping."""
+
+PHASE_5_SYSTEM = """\
+You are an FDA regulatory expert performing a final consistency audit on a Nutrition Facts label.
+
+Tasks:
+1. PDP Area & Type Size:
+   - Rectangular: PDP area = height_in × width_in
+   - Cylindrical: PDP area = height_in × (π × diameter_in) / num_display_panels
+   - Minimum type size thresholds:
+     ≤5 sq in → 0.0625" (1/16")
+     5-25 sq in → 0.125" (1/8")
+     25-100 sq in → 0.1875" (3/16")
+     >100 sq in → 0.25" (1/4")
+
+2. Health Claims:
+   - Only include claims substantiated by the product's computed nutrient values
+   - When in doubt, use empty list []
+
+3. Consistency Violations:
+   - Check for cross-step inconsistencies (e.g., serving size doesn't match RACC for declared category)
+   - Report only genuine violations you can verify from the data
+   - Do NOT hallucinate violations — empty list [] is better than false positives
+
+Return ONLY a JSON object with keys:
+- declared_type_size_inch: minimum type size for the PDP area (float)
+- health_claims: list of substantiated health claims (usually [])
+- consistency_violations: list of identified cross-step issues (usually [])
+No explanation, no markdown wrapping."""
+
+_PHASE_SYSTEMS = {
+    1: PHASE_1_SYSTEM,
+    2: PHASE_2_SYSTEM,
+    3: PHASE_3_SYSTEM,
+    4: PHASE_4_SYSTEM,
+    5: PHASE_5_SYSTEM,
+}
 
 
-def _precompute_ingredient_order(episode_context: dict) -> list[str]:
-    """
-    Pre-compute ingredient order by finished weight (after moisture loss).
-    """
-    recipe = episode_context.get("recipe", [])
-    moisture_loss_pct = episode_context.get("moisture_loss_pct", 0.0)
-    total_as_added = sum(ing["weight_as_added_g"] for ing in recipe)
-    total_moisture_loss = total_as_added * (moisture_loss_pct / 100.0)
-    moisture_contributing_total = sum(
-        ing["weight_as_added_g"] for ing in recipe if ing.get("moisture_contributing", False)
-    )
+# ─────────────────────────────────────────────────────────────────────────────
+# PHASE-SPECIFIC USER PROMPT BUILDERS
+# ─────────────────────────────────────────────────────────────────────────────
 
-    finished = []
-    for ing in recipe:
-        w = ing["weight_as_added_g"]
-        if ing.get("moisture_contributing", False) and moisture_contributing_total > 0:
-            w = w - (w / moisture_contributing_total) * total_moisture_loss
-        finished.append((ing["ingredient_slug"], w))
+def _build_phase_user_prompt(phase: int, observation: dict, prior_submissions: dict) -> str:
+    """Build the user prompt for a given phase from the observation data."""
+    phase_data = observation.get("phase_data", {})
+    text = observation.get("text", "")
 
-    finished.sort(key=lambda x: x[1], reverse=True)
-    return [name for name, _ in finished]
+    if phase == 1:
+        return (
+            f"Classify this food product and determine the RACC:\n\n"
+            f"Food description: {phase_data.get('food_category_description', 'unknown')}\n"
+            f"Physical form: {phase_data.get('physical_form', 'unknown')}\n"
+            f"Unit weight: {phase_data.get('unit_weight_g', 'N/A')}g\n"
+            f"Total package weight: {phase_data.get('total_package_weight_g', 'unknown')}g\n"
+        )
+
+    if phase == 2:
+        p1 = prior_submissions.get(1, {})
+        return (
+            f"Determine the label format and serving size.\n\n"
+            f"From Phase 1:\n"
+            f"  Food category: {p1.get('food_category', 'unknown')}\n"
+            f"  RACC: {p1.get('racc_g', 'unknown')}g\n"
+            f"  Household measure: {p1.get('household_measure', 'unknown')}\n\n"
+            f"Product info:\n"
+            f"  Physical form: {phase_data.get('physical_form', 'unknown')}\n"
+            f"  Unit weight: {phase_data.get('unit_weight_g', 'N/A')}g\n"
+            f"  Total package weight: {phase_data.get('total_package_weight_g', 'unknown')}g\n"
+        )
+
+    if phase == 3:
+        p2 = prior_submissions.get(2, {})
+        return (
+            f"Compute nutrient values for the label.\n\n"
+            f"From Phase 2:\n"
+            f"  Serving size: {p2.get('serving_size_g', 'unknown')}g\n\n"
+            f"Lab data:\n"
+            f"  Lab sample size: {phase_data.get('lab_sample_size_g', 'unknown')}g\n"
+            f"  Lab nutrients:\n```json\n{json.dumps(phase_data.get('lab_nutrients', {}), indent=2)}\n```\n"
+        )
+
+    if phase == 4:
+        return (
+            f"Determine ingredient order after moisture loss.\n\n"
+            f"Recipe:\n```json\n{json.dumps(phase_data.get('recipe', []), indent=2)}\n```\n\n"
+            f"Moisture loss: {phase_data.get('moisture_loss_pct', 0)}%\n"
+        )
+
+    if phase == 5:
+        return (
+            f"Perform the final consistency audit.\n\n"
+            f"Container:\n```json\n{json.dumps(phase_data.get('container', {}), indent=2)}\n```\n\n"
+            f"Prior submissions:\n```json\n{json.dumps(prior_submissions, indent=2)}\n```\n"
+        )
+
+    return text
 
 
-def _compute_pdp_and_type_size(episode_context: dict) -> tuple[float, float]:
-    """Compute PDP area and minimum type size from container info."""
-    import math
-    container = episode_context.get("container", {})
-    shape = container.get("shape", "rectangular")
-    height = container.get("height_in", 0)
+# ─────────────────────────────────────────────────────────────────────────────
+# ACTION BUILDER (add phase number to parsed JSON)
+# ─────────────────────────────────────────────────────────────────────────────
 
-    if shape == "cylindrical":
-        diameter = container.get("diameter_in", 0)
-        num_panels = container.get("num_display_panels", 1)
-        pdp_area = height * (math.pi * diameter) / num_panels
-    else:
-        width = container.get("width_in", 0)
-        pdp_area = height * width
-
-    if pdp_area <= 5:
-        min_type = 0.0625
-    elif pdp_area <= 25:
-        min_type = 0.125
-    elif pdp_area <= 100:
-        min_type = 0.1875
-    else:
-        min_type = 0.25
-
-    return pdp_area, min_type
-
-
-def _build_user_prompt(observation_data: dict) -> str:
-    """
-    Build the initial user prompt. Raw episode data only — no pre-computed answers.
-    The agent must reason through scaling, ingredient ordering, and PDP area itself.
-    """
-    episode_context = observation_data.get("episode_context", {})
-    draft_label = observation_data.get("draft_label", {})
-
-    prompt = (
-        "You are correcting a draft FDA Nutrition Facts label. The draft contains errors.\n\n"
-        f"## Episode Context\n```json\n{json.dumps(episode_context, indent=2)}\n```\n\n"
-        f"## Draft Label (contains errors)\n```json\n{json.dumps(draft_label, indent=2)}\n```\n\n"
-        "## YOUR TASK\n\n"
-        "1. **Serving size**: Determine the correct serving_size_g from 21 CFR 101.12 RACC for this food category.\n"
-        "   - For bulk products: serving = RACC. For discrete units: if one unit is 50-200% of RACC, one unit IS the serving.\n"
-        "   - For single_serving_container: serving = total_package_weight_g.\n\n"
-        "2. **Nutrients**: Scale each lab nutrient to your serving size:\n"
-        "     nutrient_per_serving = (lab_nutrient / lab_sample_size_g) * serving_size_g\n"
-        "   Then apply FDA round-half-UP (floor(value/increment + 0.5) * increment):\n"
-        "   - Calories: <5→0, 5-50→nearest 5, >50→nearest 10\n"
-        "   - Fat/sat fat/trans fat: <0.5→0, 0.5-5→nearest 0.5, >5→nearest 1\n"
-        "   - Cholesterol: <2→0, ≥5→nearest 5mg\n"
-        "   - Sodium: <5→0, 5-140→nearest 5, >140→nearest 10\n"
-        "   - Carb/fiber/sugars/added sugars/protein: <0.5→0, ≥1→nearest 1\n"
-        "   - Vitamin D: nearest 0.1mcg. Iron: nearest 0.1mg\n"
-        "   - Calcium: <5→0, 5-140→nearest 10, >140→nearest 20\n"
-        "   - Potassium: <5→0, 5-140→nearest 5, >140→nearest 10\n\n"
-        "3. **Atwater calories**: energy_kcal = round_calories(9 × UNROUNDED_fat + 4 × UNROUNDED_carb + 4 × UNROUNDED_protein)\n"
-        "   Use UNROUNDED scaled values, not the rounded declared values.\n\n"
-        "4. **%DV**: %DV = floor(rounded_declared_value / DRV × 100 + 0.5)\n"
-        "   DRVs: fat=78g, sat_fat=20g, cholesterol=300mg, sodium=2300mg, carb=275g,\n"
-        "   fiber=28g, added_sugars=50g, protein=50g, vit_d=20mcg, calcium=1300mg,\n"
-        "   iron=18mg, potassium=4700mg. trans_fat and total_sugars → null.\n\n"
-        "5. **Ingredient list**: Sort ingredients by FINISHED weight (after moisture loss).\n"
-        "   - total_moisture_loss = total_as_added_weight × (moisture_loss_pct / 100)\n"
-        "   - Distribute moisture loss proportionally among moisture_contributing ingredients only.\n"
-        "   - finished_weight_i = as_added_i − (as_added_i / mc_total) × total_moisture_loss\n"
-        "   - Non-moisture-contributing ingredients keep their as-added weight.\n"
-        "   - Sort descending by finished weight.\n\n"
-        "6. **Type size**: Compute PDP area from container dimensions:\n"
-        "   - Rectangular: area = height_in × width_in\n"
-        "   - Cylindrical: area = height_in × (π × diameter_in) / num_display_panels\n"
-        "   - Min type size: ≤5 sq in → 0.0625\", 5-25 → 0.125\", 25-100 → 0.1875\", >100 → 0.25\"\n"
-        "   - declared_type_size_inch must be ≥ minimum.\n\n"
-        "7. **Health claims**: Set to [] unless clearly substantiated by nutrient values.\n\n"
-        "Return ONLY a JSON object with keys: serving_size_g, label_format, declared_type_size_inch,\n"
-        "nutrients, percent_dvs, ingredient_list, health_claims.\n"
-        "No explanation, no markdown wrapping.\n\n"
-        "You will receive feedback after each attempt. Use all available steps to improve your score."
-    )
-    return prompt
+def _build_action_for_phase(phase: int, parsed_json: dict) -> dict:
+    """Wrap parsed LLM output into a phase-tagged action dict."""
+    action = {"phase": phase}
+    action.update(parsed_json)
+    return action
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -427,51 +380,21 @@ def _log_end(success: bool, steps: int, score: float, rewards: list[float]) -> N
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# MAIN AGENT LOOP
+# MAIN AGENT LOOP (HTTP-only, 5-phase)
 # ─────────────────────────────────────────────────────────────────────────────
-
-def _build_revision_prompt(previous_label: dict, feedback_text: str) -> str:
-    """
-    Build a follow-up prompt that includes the agent's previous submission
-    and the environment's feedback on what was wrong.
-
-    Key strategy: tell the model to NOT change fields that are already correct,
-    and focus only on the incorrect ones.
-    """
-    return (
-        "Your previous submission had errors. Here is the feedback:\n\n"
-        f"## Feedback\n```\n{feedback_text}\n```\n\n"
-        f"## Your Previous Label\n```json\n{json.dumps(previous_label, indent=2)}\n```\n\n"
-        "## CRITICAL INSTRUCTIONS\n\n"
-        "**DO NOT change fields that are already marked OK.** Only fix the incorrect fields.\n\n"
-        "Common mistakes to check:\n"
-        "- **serving_size_g wrong?** You may have the wrong RACC category. "
-        "Key RACC values: RTE granola/cereal clusters = 60g, grain bars = 40g, hot cereal = 40g, "
-        "nut butters/spreads = 32g, cookies/nuts/snacks/candy = 30g, oils = 14g. "
-        "If serving_size changes, ALL nutrients and %DVs must be recalculated.\n"
-        "- **nutrients wrong?** Re-check: scaled_value = (lab_value / lab_sample_size_g) * serving_size_g. "
-        "Then apply the correct FDA rounding tier. Remember rounding is round-half-UP.\n"
-        "- **percent_dvs wrong?** Recompute: %DV = floor(rounded_nutrient / DRV * 100 + 0.5). "
-        "trans_fat and total_sugars must be null.\n"
-        "- **ingredient_list wrong?** Use the pre-computed order from the first message. "
-        "Do NOT re-sort yourself.\n"
-        "- **atwater_consistency wrong?** energy_kcal = round_calories(9*UNROUNDED_fat + 4*UNROUNDED_carb + 4*UNROUNDED_protein). "
-        "Use the UNROUNDED scaled values from the pre-computed table.\n"
-        "- **health_claims wrong?** Set to []. Always.\n\n"
-        "Return ONLY the corrected JSON. Keep all correct fields unchanged."
-    )
-
 
 def run_baseline_agent() -> dict[str, float]:
     """
-    Run the baseline agent against all tasks with multi-step feedback.
+    Run the baseline agent against all tasks using the 5-phase HTTP flow.
 
     For each task:
-    1. Reset the environment with a fixed seed
-    2. Send the draft label + FDA rules to the LLM
-    3. Parse the LLM's corrected label and submit via /step
-    4. If not done, feed back the grader feedback and let the LLM revise
-    5. Repeat until done, then submit all actions to /grader
+    1. POST /reset → get phase 1 observation
+    2. For each phase 1-5:
+       a. Build phase-specific prompt
+       b. Call LLM
+       c. Parse JSON response
+       d. POST /step with phase-tagged action
+    3. POST /grader to get official score
 
     Returns:
         {"task_easy": 0.73, "task_medium": 0.65, "task_hard": 0.55}
@@ -488,37 +411,44 @@ def run_baseline_agent() -> dict[str, float]:
 
     for task in task_list:
         task_id = task["task_id"]
-        max_steps = task.get("max_steps", 1)
         seed = TASK_SEEDS.get(task_id, 42)
 
         _log_start(task_id, MODEL_NAME)
 
-        # Use local environment for multi-step loop (HTTP endpoints are stateless)
-        local_env = FDAEnvironment()
-        obs = local_env.reset(task_id=task_id, seed=seed)
-
-        observation_data = {
-            "text": obs.text,
-            "draft_label": obs.draft_label,
-            "episode_context": obs.episode_context,
-        }
-
-        # Build initial prompt
-        user_prompt = _build_user_prompt(observation_data)
-        messages = [
-            {"role": "system", "content": FDA_REGULATORY_RULES},
-            {"role": "user", "content": user_prompt},
-        ]
+        # Reset environment
+        reset_response = http_client.post("/reset", json={
+            "task_id": task_id,
+            "seed": seed,
+        })
+        reset_response.raise_for_status()
+        reset_data = reset_response.json()
+        observation = reset_data["observation"]
 
         all_actions: list[dict] = []
         all_rewards: list[float] = []
+        prior_submissions: dict = {}
         done = False
-        step_number = 0
 
-        while not done:
-            step_number += 1
+        for phase in range(1, 6):
+            if done:
+                break
 
-            # Call the LLM
+            # Build phase-specific prompt
+            system_prompt = _PHASE_SYSTEMS[phase]
+            user_prompt = _build_phase_user_prompt(phase, observation, prior_submissions)
+
+            # Include feedback from previous phase if available
+            feedback_text = observation.get("text", "")
+            if phase > 1 and "FEEDBACK" in feedback_text:
+                user_prompt = f"{feedback_text}\n\n---\n\n{user_prompt}"
+
+            messages = [
+                {"role": "system", "content": system_prompt},
+                {"role": "user", "content": user_prompt},
+            ]
+
+            # Call LLM
+            llm_error: str | None = None
             try:
                 completion = openai_client.chat.completions.create(
                     model=MODEL_NAME,
@@ -529,73 +459,74 @@ def run_baseline_agent() -> dict[str, float]:
                 llm_response_text = completion.choices[0].message.content or ""
             except Exception as exception:
                 llm_response_text = ""
-                logger.warning("LLM call failed at step %d: %s", step_number, exception)
+                llm_error = str(exception)
+                logger.warning("LLM call failed at phase %d: %s", phase, exception)
 
-            # Parse the corrected label
-            corrected_label = _extract_json_from_response(llm_response_text)
-            if corrected_label is None:
-                logger.warning("Could not parse JSON from LLM response — task=%s step=%d", task_id, step_number)
-                corrected_label = {}
+            # Parse response
+            parsed = _extract_json_from_response(llm_response_text)
+            if parsed is None:
+                logger.warning("Could not parse JSON from LLM — task=%s phase=%d", task_id, phase)
+                parsed = {}
 
-            all_actions.append({"label": corrected_label, "final_submission": done})
+            # Build action with phase tag
+            action = _build_action_for_phase(phase, parsed)
+            all_actions.append(action)
 
-            # Submit to local environment
-            step_result = local_env.step(FDAAction(label=corrected_label))
-            step_reward = step_result.reward if step_result.reward is not None else 0.0
-            done = step_result.done
+            # Track prior submissions for context in later phases
+            prior_submissions[phase] = parsed
 
-            all_rewards.append(step_reward)
+            # Submit to environment
+            step_response = http_client.post("/step", json={"action": action})
+            step_response.raise_for_status()
+            step_data = step_response.json()
 
-            action_json_string = json.dumps(corrected_label, separators=(",", ":"))
+            reward = step_data.get("reward") or 0.0
+            done = step_data.get("done", False)
+            observation = step_data.get("observation", {})
+            all_rewards.append(reward)
+
+            action_json_string = json.dumps(parsed, separators=(",", ":"))
             _log_step(
-                step_number=step_number,
+                step_number=phase,
                 action_json=action_json_string,
-                reward=step_reward,
+                reward=reward,
                 done=done,
+                error=llm_error,
             )
 
-            if not done:
-                # Build revision prompt from feedback and add to conversation
-                feedback_text = step_result.text
-                revision_prompt = _build_revision_prompt(corrected_label, feedback_text)
-                messages.append({"role": "assistant", "content": llm_response_text})
-                messages.append({"role": "user", "content": revision_prompt})
-                logger.info("task=%s step=%d score=%.3f → revising", task_id, step_number, step_reward)
+            logger.info("task=%s phase=%d reward=%.3f done=%s", task_id, phase, reward, done)
 
-        # Final grader call for official score
-        grader_response = http_client.post(
-            "/grader",
-            json={
-                "task_id": task_id,
-                "seed": seed,
-                "actions": all_actions,
-            },
-        )
+        # Get official grader score
+        grader_response = http_client.post("/grader", json={
+            "task_id": task_id,
+            "seed": seed,
+            "actions": all_actions,
+        })
         grader_response.raise_for_status()
         grader_result = grader_response.json()
         grader_score = grader_result["grader_score"]
 
         _log_end(
             success=grader_score > 0.0,
-            steps=step_number,
+            steps=len(all_actions),
             score=grader_score,
             rewards=all_rewards,
         )
 
         task_scores[task_id] = grader_score
-        logger.info("task=%s DONE  final_score=%.3f  steps=%d", task_id, grader_score, step_number)
+        logger.info("task=%s DONE  final_score=%.3f  steps=%d", task_id, grader_score, len(all_actions))
 
     http_client.close()
     return task_scores
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# SINGLE-TASK RUNNER (for UI /baseline/run endpoint)
+# SINGLE-TASK RUNNER (for /baseline/run endpoint)
 # ─────────────────────────────────────────────────────────────────────────────
 
 def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
     """
-    Run the baseline agent for a single task and return full results for the UI.
+    Run the baseline agent for a single task via HTTP and return results.
 
     Returns:
         {
@@ -604,43 +535,47 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
             "grader_score": float,
             "steps_taken": int,
             "rewards": list[float],
-            "draft_label": dict,
-            "corrected_label": dict,   # label from the best-scoring step
-            "episode_context": dict,
+            "phase_scores": dict,
         }
     """
     logger.info("run_baseline_task  task=%s seed=%s  model=%s", task_id, seed, MODEL_NAME)
+    http_client = httpx.Client(base_url=ENVIRONMENT_BASE_URL, timeout=60)
     openai_client = _create_openai_client()
-    local_env = FDAEnvironment()
-    obs = local_env.reset(task_id=task_id, seed=seed)
+
     _log_start(task_id, MODEL_NAME)
 
-    draft_label = obs.draft_label
-    episode_context = obs.episode_context
-    actual_seed = obs.metadata.get("seed", seed)
+    actual_seed = seed or TASK_SEEDS.get(task_id, 42)
 
-    observation_data = {
-        "text": obs.text,
-        "draft_label": draft_label,
-        "episode_context": episode_context,
-    }
+    # Reset
+    reset_response = http_client.post("/reset", json={
+        "task_id": task_id,
+        "seed": actual_seed,
+    })
+    reset_response.raise_for_status()
+    observation = reset_response.json()["observation"]
 
-    messages = [
-        {"role": "system", "content": FDA_REGULATORY_RULES},
-        {"role": "user", "content": _build_user_prompt(observation_data)},
-    ]
-
+    all_actions: list[dict] = []
     all_rewards: list[float] = []
-    best_score = 0.0
-    best_label: dict = {}
+    prior_submissions: dict = {}
     done = False
-    step_number = 0
 
-    while not done:
-        step_number += 1
-        logger.info("  LLM call step=%d — sending request to %s", step_number, API_BASE_URL or "openai")
+    for phase in range(1, 6):
+        if done:
+            break
+
+        system_prompt = _PHASE_SYSTEMS[phase]
+        user_prompt = _build_phase_user_prompt(phase, observation, prior_submissions)
+
+        feedback_text = observation.get("text", "")
+        if phase > 1 and "FEEDBACK" in feedback_text:
+            user_prompt = f"{feedback_text}\n\n---\n\n{user_prompt}"
+
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+
         llm_error: str | None = None
-
         try:
             completion = openai_client.chat.completions.create(
                 model=MODEL_NAME,
@@ -649,63 +584,63 @@ def run_baseline_task(task_id: str, seed: int | None = None) -> dict:
                 temperature=0.0,
             )
             llm_response_text = completion.choices[0].message.content or ""
-            logger.info("  LLM call step=%d — response received (%d chars)", step_number, len(llm_response_text))
         except Exception as exception:
             llm_response_text = ""
             llm_error = str(exception)
-            logger.warning("LLM call failed at step %d: %s", step_number, exception)
+            logger.warning("LLM call failed at phase %d: %s", phase, exception)
 
-        corrected_label = _extract_json_from_response(llm_response_text) or {}
-        step_result = local_env.step(FDAAction(label=corrected_label))
-        step_reward = step_result.reward if step_result.reward is not None else 0.0
-        done = step_result.done
-        all_rewards.append(step_reward)
-        action_json_string = json.dumps(corrected_label, separators=(",", ":"))
+        parsed = _extract_json_from_response(llm_response_text) or {}
+        action = _build_action_for_phase(phase, parsed)
+        all_actions.append(action)
+        prior_submissions[phase] = parsed
+
+        step_response = http_client.post("/step", json={"action": action})
+        step_response.raise_for_status()
+        step_data = step_response.json()
+
+        reward = step_data.get("reward") or 0.0
+        done = step_data.get("done", False)
+        observation = step_data.get("observation", {})
+        all_rewards.append(reward)
+
+        action_json_string = json.dumps(parsed, separators=(",", ":"))
         _log_step(
-            step_number=step_number,
+            step_number=phase,
             action_json=action_json_string,
-            reward=step_reward,
+            reward=reward,
             done=done,
             error=llm_error,
         )
 
-        improved = step_reward > best_score
-        if improved:
-            best_score = step_reward
-            best_label = corrected_label
+    # Get state for phase scores
+    state_response = http_client.get("/state")
+    state_data = state_response.json() if state_response.status_code == 200 else {}
 
-        logger.info(
-            "  step=%d  score=%.3f  best=%.3f  %s",
-            step_number, step_reward, best_score,
-            "↑ improved" if improved else "↔ no change",
-        )
+    # Get official grader score
+    grader_response = http_client.post("/grader", json={
+        "task_id": task_id,
+        "seed": actual_seed,
+        "actions": all_actions,
+    })
+    grader_response.raise_for_status()
+    grader_score = grader_response.json()["grader_score"]
 
-        if not done:
-            revision_prompt = _build_revision_prompt(corrected_label, step_result.text)
-            messages.append({"role": "assistant", "content": llm_response_text})
-            messages.append({"role": "user", "content": revision_prompt})
-
-    # Get detailed group scores from final grading
-    ground_truth = local_env.state.ground_truth
-    grader_result = grade(best_label, ground_truth)
     _log_end(
-        success=best_score > 0.0,
-        steps=step_number,
-        score=best_score,
+        success=grader_score > 0.0,
+        steps=len(all_actions),
+        score=grader_score,
         rewards=all_rewards,
     )
 
-    logger.info("run_baseline_task  task=%s DONE  score=%.3f  steps=%d", task_id, best_score, step_number)
+    http_client.close()
+    logger.info("run_baseline_task  task=%s DONE  score=%.3f  steps=%d", task_id, grader_score, len(all_actions))
     return {
         "task_id": task_id,
         "seed": actual_seed,
-        "grader_score": best_score,
-        "steps_taken": step_number,
+        "grader_score": grader_score,
+        "steps_taken": len(all_actions),
         "rewards": all_rewards,
-        "draft_label": draft_label,
-        "corrected_label": best_label,
-        "episode_context": episode_context,
-        "group_scores": grader_result["group_scores"],
+        "phase_scores": state_data.get("phase_scores", {}),
     }
 
 

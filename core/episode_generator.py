@@ -180,6 +180,25 @@ def _compute_percent_dvs(rounded: dict[str, float]) -> dict[str, Optional[float]
     return result
 
 
+def _build_compound_sublists(recipe: list[dict]) -> dict[str, list[str]]:
+    """Build compound ingredient sub-ingredient lists from recipe."""
+    sublists = {}
+    for item in recipe:
+        if item.get("is_compound", False):
+            slug = item["ingredient_slug"]
+            product = SEED_PRODUCTS[slug]
+            subs = product.get("sub_ingredients", [])
+            if subs:
+                sublists[slug] = list(subs)
+    return sublists
+
+
+def _build_serving_declaration(racc_entry, serving_g: float, physical_form: str) -> str:
+    """Build serving declaration text like '1 bar (40g)' or '2 tbsp (32g)'."""
+    hm = getattr(racc_entry, "household_measure", None) or "1 serving"
+    return f"{hm} ({serving_g:.0f}g)"
+
+
 def _build_ground_truth(
     racc_entry,
     serving_g: float,
@@ -190,8 +209,9 @@ def _build_ground_truth(
     recipe: list[dict],
     container: dict,
     moisture_loss_pct: float = 0.0,
+    physical_form: str = "bulk",
 ) -> dict:
-    """Assemble the complete ground truth dict for an episode."""
+    """Assemble phase-keyed ground truth dict for an episode."""
     scaled = _scale_to_serving(lab_nutrients, lab_sample_g, serving_g)
 
     # Atwater on pre-rounded scaled values (per CFR: apply to actual amounts)
@@ -231,6 +251,9 @@ def _build_ground_truth(
                                     width_in=container["width_in"])
     type_tier = lookup_min_type_size(pdp_area)
 
+    # Compound ingredient sublists
+    compound_sublists = _build_compound_sublists(recipe)
+
     # 2% threshold for compound ingredients — denominator is total finished weight
     total_finished_w = sum(_fw(r) for r in recipe)
     two_pct_slugs = [
@@ -240,7 +263,45 @@ def _build_ground_truth(
         and (_fw(r) / total_finished_w) <= 0.02
     ]
 
+    # Serving declaration text
+    serving_declaration = _build_serving_declaration(racc_entry, serving_g, physical_form)
+
     return {
+        # Phase-keyed ground truth for the v2 grader
+        "phase_1": {
+            "food_category": racc_entry.category,
+            "racc_g": racc_entry.racc_g,
+            "household_measure": getattr(racc_entry, "household_measure", "1 serving"),
+        },
+        "phase_2": {
+            "label_format": label_format,
+            "serving_size_g": serving_g,
+            "serving_declaration_text": serving_declaration,
+            "dual_column_required": dual_column,
+        },
+        "phase_3": {
+            "per_serving_scaled_unrounded": scaled,
+            "per_serving_rounded": rounded,
+            "atwater_kcal_raw": atwater_kcal_raw,
+            "atwater_kcal_declared": atwater_kcal_declared,
+            "percent_dvs": percent_dvs,
+        },
+        "phase_4": {
+            "ingredient_order": ingredient_order,
+            "compound_sublists": compound_sublists,
+            "ingredients_below_2pct": two_pct_slugs,
+        },
+        "phase_5": {
+            "pdp_area_sq_in": pdp_area,
+            "min_type_size_inch": type_tier.min_type_size_inch,
+            "min_type_size_description": type_tier.description,
+            "valid_health_claims": [],
+            "consistency_violations": [],
+        },
+        # Raw data for dual-scoring recomputation in grader_v2
+        "lab_nutrients_raw": dict(lab_nutrients),
+        "lab_sample_size_g": lab_sample_g,
+        # Legacy flat keys (used by v1 grader in existing tests)
         "racc_category": racc_entry.category,
         "racc_g": racc_entry.racc_g,
         "serving_size_g": serving_g,
@@ -1154,6 +1215,7 @@ def generate_episode(
         recipe=recipe,
         container=container,
         moisture_loss_pct=moisture_loss_pct,
+        physical_form=physical_form,
     )
 
     # Add racc candidates for medium/hard

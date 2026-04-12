@@ -140,7 +140,8 @@ def get_state():
             "difficulty": s.difficulty,
             "step_count": s.step_count,
             "max_steps": s.max_steps,
-            "best_score": s.best_score,
+            "current_phase": s.current_phase,
+            "phase_scores": dict(s.phase_scores),
             "completed": s.completed,
         }
 

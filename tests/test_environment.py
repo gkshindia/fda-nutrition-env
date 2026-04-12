@@ -1,5 +1,5 @@
 """
-Integration tests for FDAEnvironment — reset/step/grader_score cycle.
+Integration tests for FDAEnvironment — 5-phase sequential episode flow.
 """
 from __future__ import annotations
 
@@ -7,8 +7,6 @@ import pytest
 
 from env.server.environment import FDAEnvironment
 from env.models import FDAAction, FDAObservation
-from core.episode_generator import _build_correct_label
-from core.grader import grade
 
 
 @pytest.fixture
@@ -16,88 +14,148 @@ def env():
     return FDAEnvironment()
 
 
-# ── Test 1: reset returns valid observation for all tasks ──────────────────────
+# ── Test 1: reset returns valid phase 1 observation ──────────────────────────
 
 @pytest.mark.parametrize("task_id", ["task_easy", "task_medium", "task_hard"])
 def test_reset_returns_observation(env, task_id):
     obs = env.reset(task_id=task_id, seed=42)
     assert isinstance(obs, FDAObservation)
     assert len(obs.text) > 0
-    assert len(obs.draft_label) > 0
-    assert "nutrients" in obs.draft_label
-    assert len(obs.episode_context) > 0
-    assert "lab_nutrients" in obs.episode_context
+    assert obs.phase == 1
+    assert obs.done is False
+    assert "food_category_description" in obs.phase_data
+    assert obs.prior_submissions == {}
+
+
+# ── Test 2: full 5-step episode reaches done ─────────────────────────────────
+
+def test_full_five_step_episode(env):
+    obs = env.reset(task_id="task_easy", seed=42)
+    assert obs.phase == 1
+
+    # Phase 1
+    obs = env.step(FDAAction(phase=1, food_category="test", racc_g=30.0, household_measure="1 serving"))
+    assert obs.phase == 2
     assert obs.done is False
 
+    # Phase 2
+    obs = env.step(FDAAction(phase=2, label_format="single_column", serving_size_g=30.0, serving_declaration_text="1 serving (30g)"))
+    assert obs.phase == 3
+    assert obs.done is False
 
-# ── Test 2: final_submission step returns done with reward in [0, 1] ──────────
+    # Phase 3
+    obs = env.step(FDAAction(phase=3, nutrients={}, percent_dvs={}, energy_kcal=0))
+    assert obs.phase == 4
+    assert obs.done is False
 
-def test_step_final_submission_returns_done(env):
-    obs = env.reset(task_id="task_easy", seed=42)
-    result = env.step(FDAAction(label=obs.draft_label, final_submission=True))
-    assert result.done is True
-    assert 0.0 <= result.reward <= 1.0
+    # Phase 4
+    obs = env.step(FDAAction(phase=4, ingredient_list=[], compound_ingredient_sublists={}))
+    assert obs.phase == 5
+    assert obs.done is False
 
-
-# ── Test 2b: non-final step returns feedback (not done) ──────────────────────
-
-def test_step_non_final_returns_feedback(env):
-    obs = env.reset(task_id="task_easy", seed=42)
-    result = env.step(FDAAction(label=obs.draft_label))
-    assert result.done is False
-    assert result.reward is not None
-    assert "Group scores" in result.text
-    assert "Incorrect fields" in result.text or "All fields correct" in result.text
-    assert "expected None" not in result.text
-    assert "must be at least" in result.text
+    # Phase 5
+    obs = env.step(FDAAction(phase=5, declared_type_size_inch=0.125, health_claims=[], consistency_violations=[]))
+    assert obs.done is True
+    assert obs.reward is not None
+    assert 0.0 <= obs.reward <= 1.0
 
 
-# ── Test 3: perfect score ─────────────────────────────────────────────────────
+# ── Test 3: phase mismatch raises error ──────────────────────────────────────
+
+def test_phase_mismatch_raises(env):
+    env.reset(task_id="task_easy", seed=42)
+    with pytest.raises(ValueError, match="Phase mismatch"):
+        env.step(FDAAction(phase=3, nutrients={}, percent_dvs={}, energy_kcal=0))
+
+
+# ── Test 4: step before reset raises error ───────────────────────────────────
+
+def test_step_before_reset_raises(env):
+    with pytest.raises(RuntimeError, match="not initialized"):
+        env.step(FDAAction(phase=1, food_category="test", racc_g=30.0))
+
+
+# ── Test 5: perfect score ─────────────────────────────────────────────────────
 
 @pytest.mark.parametrize("task_id", ["task_easy", "task_medium", "task_hard"])
 def test_perfect_score(env, task_id):
     env.reset(task_id=task_id, seed=42)
     gt = env.state.ground_truth
-    correct = _build_correct_label(
-        rounded=gt["per_serving_rounded"],
-        percent_dvs=gt["percent_dvs"],
-        ingredient_order=gt["ingredient_order"],
-        serving_g=gt["serving_size_g"],
-        declared_type_size_inch=gt["min_type_size_inch"],
-        label_format=gt["label_format"],
-    )
-    env.step(FDAAction(label=correct, final_submission=True))
+
+    # Phase 1
+    p1 = gt["phase_1"]
+    env.step(FDAAction(
+        phase=1,
+        food_category=p1["food_category"],
+        racc_g=p1["racc_g"],
+        household_measure=p1["household_measure"],
+    ))
+
+    # Phase 2
+    p2 = gt["phase_2"]
+    env.step(FDAAction(
+        phase=2,
+        label_format=p2["label_format"],
+        serving_size_g=p2["serving_size_g"],
+        serving_declaration_text=p2["serving_declaration_text"],
+    ))
+
+    # Phase 3
+    p3 = gt["phase_3"]
+    env.step(FDAAction(
+        phase=3,
+        nutrients=p3["per_serving_rounded"],
+        percent_dvs=p3["percent_dvs"],
+        energy_kcal=p3["atwater_kcal_declared"],
+    ))
+
+    # Phase 4
+    p4 = gt["phase_4"]
+    env.step(FDAAction(
+        phase=4,
+        ingredient_list=p4["ingredient_order"],
+        compound_ingredient_sublists=p4.get("compound_sublists", {}),
+    ))
+
+    # Phase 5
+    p5 = gt["phase_5"]
+    env.step(FDAAction(
+        phase=5,
+        declared_type_size_inch=p5["min_type_size_inch"],
+        health_claims=p5.get("valid_health_claims", []),
+        consistency_violations=p5.get("consistency_violations", []),
+    ))
+
     assert env.grader_score == pytest.approx(1.0, abs=0.001)
 
 
-# ── Test 4: garbage score ─────────────────────────────────────────────────────
+# ── Test 6: garbage score ─────────────────────────────────────────────────────
 
 def test_garbage_score(env):
     env.reset(task_id="task_easy", seed=42)
-    env.step(FDAAction(label={}, final_submission=True))
+
+    env.step(FDAAction(phase=1))
+    env.step(FDAAction(phase=2))
+    env.step(FDAAction(phase=3, nutrients={}, percent_dvs={}, energy_kcal=0))
+    env.step(FDAAction(phase=4, ingredient_list=[], compound_ingredient_sublists={}))
+    env.step(FDAAction(phase=5, declared_type_size_inch=0, health_claims=[], consistency_violations=[]))
+
     assert env.grader_score < 0.3
 
 
-# ── Test 5: draft passthrough matches grader directly ──────────────────────────
+# ── Test 7: state tracks step count and phase ────────────────────────────────
 
-def test_draft_passthrough_score(env):
-    obs = env.reset(task_id="task_medium", seed=42)
-    env.step(FDAAction(label=obs.draft_label, final_submission=True))
-    env_score = env.grader_score
-    direct_score = grade(obs.draft_label, env.state.ground_truth)["score"]
-    assert env_score == pytest.approx(direct_score, abs=0.001)
-
-
-# ── Test 6: state tracks step count ───────────────────────────────────────────
-
-def test_state_tracks_step_count(env):
+def test_state_tracks_step_and_phase(env):
     env.reset(task_id="task_easy", seed=42)
     assert env.state.step_count == 0
-    env.step(FDAAction(label={}))
+    assert env.state.current_phase == 1
+
+    env.step(FDAAction(phase=1, food_category="test", racc_g=30.0))
     assert env.state.step_count == 1
+    assert env.state.current_phase == 2
 
 
-# ── Test 7: seed reproducibility ──────────────────────────────────────────────
+# ── Test 8: seed reproducibility ──────────────────────────────────────────────
 
 def test_seed_reproducibility():
     env1 = FDAEnvironment()
@@ -105,12 +163,20 @@ def test_seed_reproducibility():
     obs1 = env1.reset(task_id="task_hard", seed=99)
     obs2 = env2.reset(task_id="task_hard", seed=99)
     assert obs1.text == obs2.text
-    assert obs1.draft_label == obs2.draft_label
+    assert obs1.phase_data == obs2.phase_data
 
-    env1.step(FDAAction(label=obs1.draft_label, final_submission=True))
-    env2.step(FDAAction(label=obs2.draft_label, final_submission=True))
+    # Same actions → same scores
+    for phase in range(1, 6):
+        action = FDAAction(phase=phase, nutrients={}, percent_dvs={}, energy_kcal=0,
+                           ingredient_list=[], compound_ingredient_sublists={},
+                           health_claims=[], consistency_violations=[],
+                           declared_type_size_inch=0)
+        env1.step(action)
+        env2.step(action)
     assert env1.grader_score == env2.grader_score
 
+
+# ── Test 9: invalid task id ───────────────────────────────────────────────────
 
 def test_invalid_task_id_raises():
     env = FDAEnvironment()
@@ -118,88 +184,50 @@ def test_invalid_task_id_raises():
         env.reset(task_id="does_not_exist", seed=42)
 
 
-# ── Test 8: multi-step improves score ────────────────────────────────────────
+# ── Test 10: prior submissions visible in later phases ────────────────────────
 
-def test_multi_step_revision_improves_score(env):
-    """Submit garbage first, then correct label with final_submission — final score should be 1.0."""
+def test_prior_submissions_visible(env):
+    env.reset(task_id="task_easy", seed=42)
+
+    # Phase 1 — no prior submissions
+    obs = env.step(FDAAction(phase=1, food_category="test", racc_g=30.0, household_measure="1 serving"))
+    assert 1 in obs.prior_submissions  # Phase 1 submission visible
+
+    # Phase 2 — prior submissions include phase 1
+    obs = env.step(FDAAction(phase=2, label_format="single_column", serving_size_g=30.0))
+    assert 1 in obs.prior_submissions
+    assert 2 in obs.prior_submissions
+
+
+# ── Test 11: phase scores recorded in state ───────────────────────────────────
+
+def test_phase_scores_recorded(env):
     env.reset(task_id="task_easy", seed=42)
     gt = env.state.ground_truth
 
-    # Step 1: submit garbage (non-final)
-    result1 = env.step(FDAAction(label={}))
-    assert result1.done is False
-    assert result1.reward < 0.3
+    # Submit perfect phase 1
+    p1 = gt["phase_1"]
+    env.step(FDAAction(
+        phase=1,
+        food_category=p1["food_category"],
+        racc_g=p1["racc_g"],
+        household_measure=p1["household_measure"],
+    ))
 
-    # Step 2: submit correct label with explicit final_submission
-    correct = _build_correct_label(
-        rounded=gt["per_serving_rounded"],
-        percent_dvs=gt["percent_dvs"],
-        ingredient_order=gt["ingredient_order"],
-        serving_g=gt["serving_size_g"],
-        declared_type_size_inch=gt["min_type_size_inch"],
-        label_format=gt["label_format"],
-    )
-    result2 = env.step(FDAAction(label=correct, final_submission=True))
-    assert result2.done is True
-    assert result2.reward == pytest.approx(1.0, abs=0.001)
+    assert 1 in env.state.phase_scores
+    assert env.state.phase_scores[1] == pytest.approx(1.0, abs=0.001)
 
 
-# ── Test 9: plateau detection auto-finalizes ─────────────────────────────────
+# ── Test 12: completed flag set after phase 5 ────────────────────────────────
 
-def test_plateau_detection_auto_finalizes(env):
-    """When score doesn't improve for 3 consecutive steps, auto-finalize."""
+def test_completed_flag(env):
     env.reset(task_id="task_easy", seed=42)
-    # Step 1: garbage — sets baseline score
-    result1 = env.step(FDAAction(label={}))
-    assert result1.done is False
-    # Step 2: same garbage — no improvement (count=1)
-    result2 = env.step(FDAAction(label={}))
-    assert result2.done is False
-    # Step 3: same garbage — no improvement (count=2)
-    result3 = env.step(FDAAction(label={}))
-    assert result3.done is False
-    # Step 4: same garbage — no improvement (count=3) → plateau → done
-    result4 = env.step(FDAAction(label={}))
-    assert result4.done is True
+    assert env.state.completed is False
 
+    for phase in range(1, 6):
+        env.step(FDAAction(phase=phase, nutrients={}, percent_dvs={}, energy_kcal=0,
+                           ingredient_list=[], compound_ingredient_sublists={},
+                           health_claims=[], consistency_violations=[],
+                           declared_type_size_inch=0))
 
-# ── Test 10: final_submission stops episode immediately ───────────────────────
-
-def test_score_threshold_auto_stop(env):
-    """Episode ends when agent sets final_submission=True, regardless of score."""
-    env.reset(task_id="task_easy", seed=42)
-    gt = env.state.ground_truth
-    correct = _build_correct_label(
-        rounded=gt["per_serving_rounded"],
-        percent_dvs=gt["percent_dvs"],
-        ingredient_order=gt["ingredient_order"],
-        serving_g=gt["serving_size_g"],
-        declared_type_size_inch=gt["min_type_size_inch"],
-        label_format=gt["label_format"],
-    )
-    # Perfect label with final_submission=True — should stop immediately
-    result = env.step(FDAAction(label=correct, final_submission=True))
-    assert result.done is True
-    assert env.state.step_count == 1  # stopped on first step
-
-
-# ── Test 11: keep best label across steps ─────────────────────────────────────
-
-def test_keep_best_label(env):
-    """Grader score reflects the best submission, not the last one."""
-    env.reset(task_id="task_easy", seed=42)
-    gt = env.state.ground_truth
-    correct = _build_correct_label(
-        rounded=gt["per_serving_rounded"],
-        percent_dvs=gt["percent_dvs"],
-        ingredient_order=gt["ingredient_order"],
-        serving_g=gt["serving_size_g"],
-        declared_type_size_inch=gt["min_type_size_inch"],
-        label_format=gt["label_format"],
-    )
-    # Step 1: perfect label
-    env.step(FDAAction(label=correct))
-    # Auto-stopped because score >= 0.90, but if it didn't:
-    # the best_label should still be the correct one
-    assert env.state.best_score == pytest.approx(1.0, abs=0.001)
-    assert env.grader_score == pytest.approx(1.0, abs=0.001)
+    assert env.state.completed is True
