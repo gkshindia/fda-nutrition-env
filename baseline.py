@@ -417,11 +417,11 @@ def _log_step(step_number: int, action_json: str, reward: float, done: bool, err
 
 
 def _log_end(success: bool, steps: int, score: float, rewards: list[float]) -> None:
-    rewards_str = ",".join(f"{r:.3f}" for r in rewards)
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
     print(
         f"[END]   success={str(success).lower()} "
         f"steps={steps} "
-        f"score={score:.3f} "
+        f"score={score:.2f} "
         f"rewards={rewards_str}"
     )
 

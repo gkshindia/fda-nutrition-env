@@ -276,13 +276,15 @@ The environment never calls the LLM — it only scores what the agent sends. The
 
 ## Baseline scores (GPT-4o-mini)
 
-| Task | Score | Typical steps |
-|---|---|---|
-| Easy | ~0.76 | 2–4 |
-| Medium | ~0.42 | 3–6 |
-| Hard | ~0.33 | 4–8 |
+Measured with `MODEL_NAME=gpt-4o-mini` via `uv run python inference.py` on 2026-04-11. Single-run figures; LLM temperature > 0 introduces some run-to-run drift.
 
-The gap between easy and hard reflects real difficulty: hard episodes require the agent to reason about serving size cascades, moisture loss, and Atwater calorie computation from scratch — without the answer being handed to it.
+| Task | Score | Steps |
+|---|---|---|
+| Easy | 0.95 | 8 |
+| Medium | 1.00 | 5 |
+| Hard | 1.00 | 5 |
+
+The baseline converges quickly when given iterative feedback: first submission typically scores 0.3–0.8 (partial credit), then the agent uses the per-field grader feedback to correct remaining errors. Plateau detection ends the episode once three consecutive steps fail to improve. Harder tasks still require the agent to reason about serving size cascades, moisture loss, and Atwater calorie computation — the partial credit on the first attempt (0.31 on medium, 0.48 on hard) shows how much state it has to recover from cold.
 
 ---
 
